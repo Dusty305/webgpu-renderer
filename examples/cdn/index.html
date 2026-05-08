@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>webgpu-streaming - CDN / Script Tag</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #111; color: #eee; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 24px; gap: 16px; }
+    canvas { width: 600px; height: 400px; display: block; border-radius: 6px; }
+    pre { font-size: .75rem; opacity: .6; }
+  </style>
+</head>
+<body>
+  <h1 style="font-size:1.1rem;opacity:.6">webgpu-streaming через &lt;script src&gt; - без сборщика</h1>
+  <canvas id="c" width="600" height="400"></canvas>
+  <pre id="stats">Загрузка…</pre>
+
+  <!-- В продакшне здесь был бы CDN-URL, например unpkg/jsDelivr.
+       Здесь мы ссылаемся на локальную сборку. -->
+  <script src="../../packages/webgpu-streaming/dist/webgpu-streaming.global.js"></script>
+  <script>
+    // IIFE-бандл экспортирует всё под глобальным именем `WebGPUStreaming`
+    const { createRenderer } = WebGPUStreaming;
+
+    (async () => {
+      const renderer = await createRenderer({
+        canvas: document.getElementById('c'),
+        memoryBudget: 64,
+      });
+
+      await renderer.loadScene();
+      renderer.setCamera({ position: [0, 2, 5], target: [0, 0, 0] });
+
+      document.getElementById('stats').textContent =
+        'GPU готов - ' + (renderer.device?.label ?? 'неизвестное устройство');
+
+      setInterval(() => {
+        const s = renderer.getStats();
+        document.getElementById('stats').textContent =
+          `fps: ${s.fps.toFixed(1)}  mem: ${s.memoryUsedMB.toFixed(1)} / ${s.memoryBudgetMB} MB  ` +
+          `textures: ${s.texturesLoaded}/${s.texturesTotal}`;
+      }, 500);
+    })();
+  </script>
+</body>
+</html>

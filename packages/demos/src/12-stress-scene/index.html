@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Демо 12 - Генератор сцены для стресс-тестирования</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0e0e0e; color: #e0e0e0; font: 13px/1.5 monospace; display: flex; flex-direction: column; height: 100vh; }
+    #header { padding: 8px 12px; background: #151515; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    #header h1 { font-size: 13px; color: #7ec8e3; }
+    select, button { font: inherit; background: #222; color: #e0e0e0; border: 1px solid #555; border-radius: 3px; padding: 3px 8px; cursor: pointer; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    button:not(:disabled):hover { background: #333; }
+    #canvas-wrap { flex: 1; position: relative; }
+    webgpu-canvas { width: 100%; height: 100%; display: block; }
+    #overlay {
+      position: absolute; top: 8px; right: 8px;
+      background: rgba(0,0,0,0.72); border: 1px solid #333; border-radius: 4px;
+      padding: 8px 12px; font-size: 11px; min-width: 220px; line-height: 1.9;
+    }
+    #overlay .row { display: flex; justify-content: space-between; gap: 16px; }
+    #overlay .val { color: #7ec8e3; text-align: right; }
+    #progress-wrap { padding: 8px 12px; background: #151515; border-top: 1px solid #2a2a2a; font-size: 11px; color: #888; min-height: 28px; }
+    #progress-bar-bg { height: 4px; background: #333; border-radius: 2px; margin-top: 4px; }
+    #progress-bar { height: 4px; background: #7ec8e3; border-radius: 2px; width: 0%; transition: width 0.1s; }
+    #warn { color: #f0a050; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>12 - Стресс-сцена</h1>
+    <label>Пресет:
+      <select id="preset-select">
+        <option value="small">small - 25 × 512px (≈33 МБ)</option>
+        <option value="medium">medium - 100 × 1024px (≈533 МБ)</option>
+        <option value="large">large - 100 × 2048px (≈2.1 ГБ)</option>
+        <option value="thesis">thesis - 200 × mixed (≈1.7 ГБ)</option>
+      </select>
+    </label>
+    <button id="gen-btn" disabled>Сгенерировать и загрузить</button>
+    <span id="warn"></span>
+  </div>
+
+  <div id="canvas-wrap">
+    <webgpu-canvas id="canvas"></webgpu-canvas>
+    <div id="overlay">
+      <div class="row"><span>Статус</span>           <span class="val" id="ov-status">Инициализация…</span></div>
+      <div class="row"><span>Объекты</span>           <span class="val" id="ov-objects">-</span></div>
+      <div class="row"><span>Ожидается</span>         <span class="val" id="ov-expected">-</span></div>
+      <div class="row"><span>Отслеживается GPU</span> <span class="val" id="ov-tracked">-</span></div>
+      <div class="row"><span>Загрузок/кадр</span>     <span class="val" id="ov-uploads">-</span></div>
+      <div class="row"><span>FPS</span>               <span class="val" id="ov-fps">-</span></div>
+    </div>
+  </div>
+
+  <div id="progress-wrap">
+    <span id="progress-label">Готово</span>
+    <div id="progress-bar-bg"><div id="progress-bar"></div></div>
+  </div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

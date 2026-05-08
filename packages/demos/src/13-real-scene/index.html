@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Демо 13 - Реальная сцена (glTF + потоковая передача текстур)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0e0e0e; color: #e0e0e0; font: 13px/1.5 monospace; display: flex; flex-direction: column; height: 100vh; }
+    #header { padding: 8px 12px; background: #151515; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    #header h1 { font-size: 13px; color: #7ec8e3; white-space: nowrap; }
+    select, button { font: inherit; background: #222; color: #e0e0e0; border: 1px solid #555; border-radius: 3px; padding: 3px 8px; cursor: pointer; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    button:not(:disabled):hover { background: #333; }
+    label { display: flex; align-items: center; gap: 6px; }
+    #canvas-wrap { flex: 1; position: relative; overflow: hidden; }
+    webgpu-canvas { width: 100%; height: 100%; display: block; }
+    #overlay {
+      position: absolute; top: 8px; right: 8px;
+      background: rgba(0,0,0,0.75); border: 1px solid #333; border-radius: 4px;
+      padding: 8px 12px; font-size: 11px; min-width: 240px; line-height: 1.9;
+    }
+    #overlay .row { display: flex; justify-content: space-between; gap: 16px; }
+    #overlay .val { color: #7ec8e3; text-align: right; }
+    #overlay .sep { border-top: 1px solid #333; margin: 3px 0; }
+    #progress-wrap { padding: 8px 12px; background: #151515; border-top: 1px solid #2a2a2a; font-size: 11px; color: #888; min-height: 28px; }
+    #progress-bar-bg { height: 4px; background: #333; border-radius: 2px; margin-top: 4px; }
+    #progress-bar { height: 4px; background: #7ec8e3; border-radius: 2px; width: 0%; transition: width 0.1s; }
+    #warn { color: #f0a050; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>13 - Реальная сцена</h1>
+    <label>Сцена:
+      <select id="scene-select">
+        <option value="DamagedHelmet">DamagedHelmet (1 меш, 5 текстур)</option>
+        <option value="Sponza">Sponza (103 примитива, 25 альбедо-текстур)</option>
+      </select>
+    </label>
+    <label>Бюджет:
+      <select id="budget-select">
+        <option value="67108864">64 МБ</option>
+        <option value="134217728" selected>128 МБ</option>
+        <option value="268435456">256 МБ</option>
+        <option value="536870912">512 МБ</option>
+        <option value="9999999999">Без ограничений</option>
+      </select>
+    </label>
+    <button id="load-btn" disabled>Загрузить сцену</button>
+    <span id="warn"></span>
+  </div>
+
+  <div id="canvas-wrap">
+    <webgpu-canvas id="canvas"></webgpu-canvas>
+    <div id="overlay">
+      <div class="row"><span>Статус</span>              <span class="val" id="ov-status">Инициализация…</span></div>
+      <div class="row"><span>Сцена</span>               <span class="val" id="ov-scene">-</span></div>
+      <div class="row"><span>Примитивы</span>           <span class="val" id="ov-prims">-</span></div>
+      <div class="row"><span>Текстуры</span>            <span class="val" id="ov-textures">-</span></div>
+      <div class="sep"></div>
+      <div class="row"><span>Отслеживается GPU</span>  <span class="val" id="ov-gpu-mem">-</span></div>
+      <div class="row"><span>Бюджет</span>              <span class="val" id="ov-budget">-</span></div>
+      <div class="row"><span>Загрузок/кадр</span>      <span class="val" id="ov-uploads">-</span></div>
+      <div class="row"><span>Вытеснений/кадр</span>    <span class="val" id="ov-evictions">-</span></div>
+      <div class="sep"></div>
+      <div class="row"><span>Draw calls</span>          <span class="val" id="ov-draws">-</span></div>
+      <div class="row"><span>FPS</span>                 <span class="val" id="ov-fps">-</span></div>
+    </div>
+  </div>
+
+  <div id="progress-wrap">
+    <span id="progress-label">Готово - выберите сцену и нажмите «Загрузить»</span>
+    <div id="progress-bar-bg"><div id="progress-bar"></div></div>
+  </div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

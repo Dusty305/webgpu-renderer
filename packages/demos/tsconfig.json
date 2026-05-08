@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "types": ["@webgpu/types"]
+  },
+  "references": [
+    { "path": "../gpu-types" },
+    { "path": "../core" },
+    { "path": "../render-basic" },
+    { "path": "../texture-streaming" }
+  ],
+  "include": ["src"]
+}

@@ -1,0 +1,43 @@
+{
+  "name": "webgpu-streaming",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "WebGPU-рендерер с потоковой передачей мип-уровней и управлением бюджетом - Web Component и программный API, без Three.js",
+  "license": "MIT",
+  "keywords": ["webgpu", "renderer", "3d", "web-components", "texture-streaming", "mip-streaming", "budget", "lru", "streaming"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Dusty305/webgpu-renderer",
+    "directory": "packages/webgpu-streaming"
+  },
+  "homepage": "https://github.com/Dusty305/webgpu-renderer#readme",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./global": "./dist/webgpu-streaming.global.js"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@webgpu-streaming/core": "^0.1.0",
+    "@webgpu-streaming/gpu-types": "^0.1.0",
+    "@webgpu-streaming/render-basic": "^0.1.0",
+    "@webgpu-streaming/texture-streaming": "^0.1.0"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.49",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
+}

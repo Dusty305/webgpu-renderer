@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>webgpu-streaming - Plain HTML</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #111; color: #eee; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 24px; gap: 24px; }
+    h1 { font-size: 1.2rem; opacity: .7; }
+    .row { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
+    .card { background: #1c1c1c; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .card h2 { font-size: .85rem; text-transform: uppercase; letter-spacing: .1em; opacity: .5; }
+    canvas, webgpu-canvas-streaming { width: 400px; height: 300px; display: block; border-radius: 4px; }
+    pre { font-size: .7rem; opacity: .6; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>webgpu-streaming - Plain HTML (без шага сборки)</h1>
+  <div class="row">
+    <!-- Подход 1: Пользовательский элемент -->
+    <div class="card">
+      <h2>Пользовательский элемент</h2>
+      <webgpu-canvas-streaming id="wc" memory-budget="64"></webgpu-canvas-streaming>
+      <pre id="wc-stats">Ожидание GPU…</pre>
+    </div>
+
+    <!-- Подход 2: Программный -->
+    <div class="card">
+      <h2>Программный (createRenderer)</h2>
+      <canvas id="pgm-canvas" width="400" height="300"></canvas>
+      <pre id="pgm-stats">Ожидание GPU…</pre>
+    </div>
+  </div>
+
+  <!-- IIFE-бандл из локальной сборки - npm и сборщик не нужны -->
+  <script src="../../packages/webgpu-streaming/dist/webgpu-streaming.global.js"></script>
+  <script>
+    const { createRenderer, WebGPUCanvasElement } = WebGPUStreaming;
+
+    /* ---- Подход с пользовательским элементом ------------------------------------------ */
+    const wc = document.getElementById('wc');
+    const wcStats = document.getElementById('wc-stats');
+
+    wc.addEventListener('gpu-ready', async () => {
+      await wc.loadScene();
+
+      // Добавляем меш тетраэдра
+      const sq3 = Math.sqrt(3);
+      const positions = new Float32Array([
+         0,  1,  0,   -sq3/2, -0.5,  0.5,   sq3/2, -0.5,  0.5,
+         0,  1,  0,    sq3/2, -0.5,  0.5,   0,     -0.5, -1,
+         0,  1,  0,    0,     -0.5, -1,    -sq3/2, -0.5,  0.5,
+        -sq3/2,-0.5, 0.5,    sq3/2,-0.5,  0.5,    0,    -0.5, -1,
+      ]);
+      const normals = new Float32Array(positions.length);
+      for (let i = 0; i < positions.length; i += 9) {
+        const ax = positions[i+3]-positions[i], ay = positions[i+4]-positions[i+1], az = positions[i+5]-positions[i+2];
+        const bx = positions[i+6]-positions[i], by = positions[i+7]-positions[i+1], bz = positions[i+8]-positions[i+2];
+        const nx = ay*bz-az*by, ny = az*bx-ax*bz, nz = ax*by-ay*bx;
+        const len = Math.hypot(nx, ny, nz) || 1;
+        for (let j = 0; j < 3; j++) { normals[i+j*3]=nx/len; normals[i+j*3+1]=ny/len; normals[i+j*3+2]=nz/len; }
+      }
+      wc.addMesh({ positions, normals }, { baseColor: '#e8803a' });
+      wc.setCamera({ position: [0, 1, 4], target: [0, 0, 0] });
+    });
+
+    setInterval(() => {
+      if (!wc.ready) return;
+      const s = wc.getStats();
+      wcStats.textContent = `fps: ${s.fps.toFixed(1)}  mem: ${s.memoryUsedMB.toFixed(1)}/${s.memoryBudgetMB} MB`;
+    }, 500);
+
+    /* ---- Программный подход ---------------------------------------------------------------------------- */
+    const pgmCanvas = document.getElementById('pgm-canvas');
+    const pgmStats  = document.getElementById('pgm-stats');
+
+    (async () => {
+      const renderer = await createRenderer({ canvas: pgmCanvas, memoryBudget: 64 });
+
+      // Простой куб
+      const s = 0.7;
+      const positions = new Float32Array([
+        // передняя грань
+        -s,-s, s,  s,-s, s,  s, s, s,  -s,-s, s,  s, s, s,  -s, s, s,
+        // задняя грань
+         s,-s,-s, -s,-s,-s, -s, s,-s,   s,-s,-s, -s, s,-s,   s, s,-s,
+        // верхняя грань
+        -s, s, s,  s, s, s,  s, s,-s,  -s, s, s,  s, s,-s,  -s, s,-s,
+        // нижняя грань
+        -s,-s,-s,  s,-s,-s,  s,-s, s,  -s,-s,-s,  s,-s, s,  -s,-s, s,
+        // правая грань
+         s,-s, s,  s,-s,-s,  s, s,-s,   s,-s, s,  s, s,-s,   s, s, s,
+        // левая грань
+        -s,-s,-s, -s,-s, s,  -s, s, s,  -s,-s,-s, -s, s, s,  -s, s,-s,
+      ]);
+      const normals = new Float32Array([
+        ...Array(6).fill([0,0,1]).flat(),
+        ...Array(6).fill([0,0,-1]).flat(),
+        ...Array(6).fill([0,1,0]).flat(),
+        ...Array(6).fill([0,-1,0]).flat(),
+        ...Array(6).fill([1,0,0]).flat(),
+        ...Array(6).fill([-1,0,0]).flat(),
+      ]);
+
+      renderer.addMesh({ positions, normals }, { baseColor: '#4a9eff' });
+      renderer.setCamera({ position: [2, 1.5, 2], target: [0, 0, 0] });
+
+      setInterval(() => {
+        const s = renderer.getStats();
+        pgmStats.textContent = `fps: ${s.fps.toFixed(1)}  mem: ${s.memoryUsedMB.toFixed(1)}/${s.memoryBudgetMB} MB`;
+      }, 500);
+    })();
+  </script>
+</body>
+</html>

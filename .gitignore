@@ -1,0 +1,9 @@
+.claude
+node_modules/
+dist/
+.DS_Store
+*.tgz
+*.local
+.vite/
+.sentry-native/
+.idea

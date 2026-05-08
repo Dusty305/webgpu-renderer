@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Demo 16 - Public API</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0f; color: #e0e0e0; font: 14px/1.5 monospace; }
+    h1   { padding: 16px; font-size: 16px; color: #88ccff; border-bottom: 1px solid #222; }
+    .row { display: flex; gap: 0; height: calc(50vh - 40px); }
+    .pane{ flex: 1; display: flex; flex-direction: column; border-right: 1px solid #222; }
+    .pane:last-child { border-right: none; }
+    .label { padding: 8px 12px; font-size: 11px; color: #888; background: #111; border-bottom: 1px solid #1a1a1a; }
+    canvas, webgpu-canvas-streaming { display: block; flex: 1; width: 100%; }
+    .stats { padding: 8px 12px; font-size: 11px; color: #aaa; background: #0d0d10; border-top: 1px solid #1a1a1a; min-height: 56px; }
+    .key  { color: #888; }
+    .val  { color: #ffe066; }
+    pre   { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Demo 16 - Public API Surface (Phase 6.1)</h1>
+  <div class="row">
+    <!-- ---- Pane 1: Custom Element approach ---- -->
+    <div class="pane">
+      <div class="label">1. Custom Element: &lt;webgpu-canvas-streaming&gt; + loadScene()</div>
+      <webgpu-canvas-streaming memory-budget="128" frame-upload-cap="8" camera-mode="orbit"></webgpu-canvas-streaming>
+      <div class="stats" id="el-stats"><pre>waiting for gpu-ready…</pre></div>
+    </div>
+    <!-- ---- Pane 2: Programmatic API ---- -->
+    <div class="pane">
+      <div class="label">2. Programmatic API: createRenderer() + addMesh()</div>
+      <canvas id="pgm-canvas"></canvas>
+      <div class="stats" id="pgm-stats"><pre>initializing…</pre></div>
+    </div>
+  </div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Демо 12 - Бенчмарк-обвязка</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: #111; color: #ccc; font: 13px/1.6 monospace; padding: 20px; min-height: 100%; }
+    h1  { color: #fff; font-size: 16px; margin-bottom: 4px; }
+    h2  { color: #aaa; font-size: 13px; margin: 16px 0 6px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+    p   { color: #888; margin-bottom: 10px; font-size: 12px; }
+    #controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    button {
+      padding: 7px 16px; background: #2a6; color: #fff; border: none;
+      border-radius: 4px; font: 13px monospace; cursor: pointer;
+    }
+    button:disabled { background: #444; cursor: default; }
+    #export-btn { background: #26a; }
+    #progress, #gen-progress {
+      font-size: 12px; color: #aaa;
+      padding: 3px 10px; background: #1a1a1a; border-radius: 4px;
+    }
+    #gen-progress { color: #7ec8e3; }
+    table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12px; }
+    th {
+      background: #1e1e1e; color: #888; padding: 5px 10px;
+      text-align: left; font-weight: normal;
+      border-bottom: 1px solid #333; white-space: nowrap;
+    }
+    td { padding: 5px 10px; border-bottom: 1px solid #1a1a1a; white-space: nowrap; }
+    tr:hover td { background: #161616; }
+    .cfg-a { color: #f88; }
+    .cfg-b { color: #fa8; }
+    .cfg-c { color: #ff8; }
+    .cfg-d { color: #8f8; }
+    .cfg-e { color: #8af; }
+    .ok     { color: #8f8; }
+    .warn   { color: #f88; }
+    .note   { color: #666; font-size: 11px; margin-top: 6px; }
+    #raw-json {
+      display: none; margin-top: 14px; padding: 12px;
+      background: #1a1a1a; border: 1px solid #333; border-radius: 4px;
+      font-size: 11px; white-space: pre; overflow: auto; max-height: 320px;
+    }
+    #canvas-host { position: fixed; width: 1px; height: 1px; overflow: hidden; bottom: 0; right: 0; }
+    webgpu-canvas { width: 320px; height: 240px; display: block; }
+  </style>
+</head>
+<body>
+  <h1>Бенчмарк-обвязка - Потоковая передача мипов с управлением бюджетом</h1>
+  <p>
+    Сцена: 25 × 512px процедурных текстур (≈ 33 МБ RGBA8 полная цепочка мипов).<br>
+    Конфиги A/B: ожидают полной загрузки, затем измеряют 120 установившихся кадров.<br>
+    Конфиги C/D/E: измеряют 300 потоковых кадров.
+  </p>
+
+  <div id="controls">
+    <button id="run-btn" disabled>▶ Запустить все бенчмарки</button>
+    <button id="export-btn" disabled>↓ Экспорт JSON</button>
+    <span id="progress">Инициализация…</span>
+  </div>
+  <div style="margin-bottom:14px">
+    <span id="gen-progress">Генерация сцены…</span>
+  </div>
+
+  <h2>Результаты</h2>
+  <table id="results-table">
+    <thead>
+      <tr>
+        <th>Конфиг</th>
+        <th>Описание</th>
+        <th>Пик GPU (МБ)</th>
+        <th>Формат</th>
+        <th>Время загр.</th>
+        <th>Статус загр.</th>
+        <th>Кадр мед. (мс)</th>
+        <th>Кадр p95 (мс)</th>
+        <th>Кадр p99 (мс)</th>
+        <th>Загружено</th>
+        <th title="обзор / крупный план / средний план">PSNR (дБ)</th>
+        <th title="обзор / крупный план / средний план">SSIM</th>
+        <th title="Первый кадр, в котором все видимые текстуры находятся в пределах 1 мипа от желаемого">Сходимость</th>
+        <th title="Кадры с изменением мипа / всего кадров измерения">Проявление / всего</th>
+      </tr>
+    </thead>
+    <tbody id="results-body">
+      <tr><td colspan="12" style="color:#555;text-align:center;padding:20px">
+        Запустите бенчмарк для просмотра результатов
+      </td></tr>
+    </tbody>
+  </table>
+
+  <p class="note">
+    * Пиковая память конфига B проецируется как RGBA8 ÷ 4 (соотношение BC7). Наведите курсор на ячейку «Формат» для реальных байт.
+    <br>
+    * Статус загрузки: ✓ done = полностью загружено, ⚠ OOM = GPU вне памяти, ⏱ timeout = превышено 60 с, ≈ streaming = потоковый конфиг.
+    <br>
+    * Измерение конфигов A/B - 120 кадров после загрузки; C/D/E - 300 потоковых кадров.
+    <br>
+    * PSNR/SSIM показывают позиции обзор / крупный план / средний план по сравнению с конфигом A (эталон). Конфиг A показывает ∞ дБ / 1.000.
+    <br>
+    * Перед захватом каждой позиции 20 разогревочных кадров позволяют менеджеру потоков адаптировать резидентность мипов к расстоянию камеры.
+    <br>
+    * Сходимость: первый кадр (и прошедшее время в мс), в котором все видимые текстуры удовлетворяют residentMip ≤ desiredMip + 1.
+    <br>
+    * Проявление: кадры, в которых любая видимая текстура изменила уровень мипа / всего кадров измерения.
+  </p>
+
+  <pre id="raw-json"></pre>
+
+  <div id="canvas-host">
+    <webgpu-canvas id="bench-canvas"></webgpu-canvas>
+  </div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

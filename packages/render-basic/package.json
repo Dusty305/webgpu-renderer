@@ -1,0 +1,39 @@
+{
+  "name": "@webgpu-streaming/render-basic",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Опциональный плагин прохода рендеринга Фонга для @webgpu-streaming/core",
+  "license": "MIT",
+  "keywords": ["webgpu", "renderer", "render-pass", "phong", "plugin"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/webgpu-streaming/webgpu-streaming",
+    "directory": "packages/render-basic"
+  },
+  "homepage": "https://github.com/webgpu-streaming/webgpu-streaming#readme",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@webgpu-streaming/gpu-types": "^0.1.0"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.49",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@webgpu-streaming/texture-streaming",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Модуль потоковой передачи мип-текстур для WebGPU с управлением бюджетом и вытеснением по алгоритму LRU",
+  "license": "MIT",
+  "keywords": ["webgpu", "texture-streaming", "mip-streaming", "lru", "budget-management"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/webgpu-streaming/webgpu-streaming",
+    "directory": "packages/texture-streaming"
+  },
+  "homepage": "https://github.com/webgpu-streaming/webgpu-streaming#readme",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@webgpu-streaming/gpu-types": "^0.1.0"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.49",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.0.0"
+  }
+}

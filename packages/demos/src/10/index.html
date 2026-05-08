@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Demo 10 - Budget Streaming</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #111; }
+    webgpu-canvas { display: block; width: 100%; height: 100%; }
+    #controls {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: rgba(0,0,0,0.7);
+      padding: 12px 18px;
+      border-radius: 6px;
+      border: 1px solid #444;
+      z-index: 10;
+      min-width: 320px;
+    }
+    .ctrl-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font: 13px monospace;
+      color: #ccc;
+    }
+    .ctrl-row label { width: 90px; }
+    .ctrl-row span  { width: 90px; text-align: right; color: #fff; }
+    input[type="range"] { flex: 1; accent-color: #7af; }
+  </style>
+</head>
+<body>
+  <webgpu-canvas id="canvas"></webgpu-canvas>
+  <div id="controls">
+    <div class="ctrl-row">
+      <label>Бюджет</label>
+      <input type="range" id="budget-slider" min="8" max="512" value="64" step="8">
+      <span id="budget-label">64 МБ</span>
+    </div>
+    <div class="ctrl-row">
+      <label>Лимит кадра</label>
+      <input type="range" id="frame-slider" min="1" max="32" value="8" step="1">
+      <span id="frame-label">8 МБ/кадр</span>
+    </div>
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "name": "@webgpu-streaming/demos",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@webgpu-streaming/core": "*",
+    "@webgpu-streaming/gpu-types": "*",
+    "@webgpu-streaming/render-basic": "*",
+    "@webgpu-streaming/texture-streaming": "*"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.49",
+    "typescript": "^5.4.0",
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}

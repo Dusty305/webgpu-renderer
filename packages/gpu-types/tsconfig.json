@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "moduleResolution": "Node16",
+    "module": "Node16",
+    "types": ["@webgpu/types"]
+  },
+  "include": ["src"]
+}

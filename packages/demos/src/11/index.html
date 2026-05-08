@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Демо 11 - Полная сцена + жизненный цикл</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #111; display: flex; }
+    #scene { flex: 1; position: relative; }
+    webgpu-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+    webgpu-canvas:active { cursor: grabbing; }
+    #sidebar {
+      width: 180px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 16px 12px;
+      background: #1a1a1a;
+      border-left: 1px solid #333;
+    }
+    #sidebar h3 { color: #aaa; font: bold 11px monospace; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+    button {
+      width: 100%;
+      padding: 8px 10px;
+      background: #2a2a2a;
+      color: #ddd;
+      border: 1px solid #444;
+      border-radius: 4px;
+      font: 12px monospace;
+      cursor: pointer;
+      text-align: left;
+    }
+    button:hover { background: #333; border-color: #666; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    #status-bar {
+      font: 11px monospace;
+      color: #888;
+      padding: 6px 0;
+      border-top: 1px solid #333;
+      margin-top: 4px;
+    }
+    #second-instance-container {
+      position: fixed;
+      bottom: 12px;
+      right: 200px;
+      width: 280px;
+      height: 200px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      overflow: hidden;
+      display: none;
+    }
+    #second-instance-container webgpu-canvas { width: 100%; height: 100%; cursor: grab; }
+  </style>
+</head>
+<body>
+  <div id="scene">
+    <webgpu-canvas id="canvas"></webgpu-canvas>
+  </div>
+  <div id="sidebar">
+    <h3>Тесты жизненного цикла</h3>
+    <button id="btn-remove">Удалить компонент</button>
+    <button id="btn-add" disabled>Вернуть компонент</button>
+    <button id="btn-loss">Симулировать потерю устройства</button>
+    <button id="btn-recover" disabled>Восстановить устройство</button>
+    <button id="btn-second">Добавить 2-й экземпляр</button>
+    <div id="status-bar">Статус: готов</div>
+    <h3 style="margin-top:8px">Подсказка</h3>
+    <div style="font:11px monospace;color:#666">Перетаскивание: вращение<br>Колесо: масштаб</div>
+  </div>
+  <div id="second-instance-container">
+    <!-- вставляется через JS -->
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

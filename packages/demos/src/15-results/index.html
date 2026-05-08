@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Демо 15 - Сводка результатов бенчмарка</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: #111; color: #ccc; font: 13px/1.6 monospace; padding: 20px; min-height: 100%; }
+    h1  { color: #fff; font-size: 16px; margin-bottom: 4px; }
+    h2  { color: #aaa; font-size: 13px; margin: 20px 0 6px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+    p   { color: #888; margin-bottom: 10px; font-size: 12px; }
+
+    /* ---- Панель загрузки файлов -------------------------------------------------------------------------------------------------------- */
+    #load-panel {
+      display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+      margin-bottom: 18px; padding: 14px;
+      background: #1a1a1a; border: 1px solid #333; border-radius: 4px;
+    }
+    .file-group { display: flex; flex-direction: column; gap: 4px; }
+    .file-group label { font-size: 11px; color: #888; }
+    input[type=file] {
+      font: 12px monospace; color: #ccc;
+      background: #222; border: 1px solid #444; border-radius: 4px;
+      padding: 4px 8px; width: 280px;
+    }
+    #load-status { font-size: 12px; color: #aaa; align-self: flex-end; padding-bottom: 4px; }
+
+    /* ---- Таблицы -------------------------------------------------------------------------------------------------------------------------- */
+    table { border-collapse: collapse; width: 100%; margin-top: 6px; font-size: 12px; }
+    th {
+      background: #1e1e1e; color: #888; padding: 5px 10px;
+      text-align: left; font-weight: normal;
+      border-bottom: 1px solid #333; white-space: nowrap;
+    }
+    td { padding: 5px 10px; border-bottom: 1px solid #1a1a1a; white-space: nowrap; }
+    tr:hover td { background: #161616; }
+    .cfg-a { color: #f88; } .cfg-b { color: #fa8; } .cfg-c { color: #ff8; }
+    .cfg-d { color: #8f8; } .cfg-e { color: #8af; }
+    .sig-yes { color: #4d4; } .sig-no  { color: #666; }
+    details > table td { font-size: 11px; }
+
+    /* ---- Обёртки для графиков ---------------------------------------------------------------------------------------------------------- */
+    .chart-wrap {
+      display: inline-flex; flex-direction: column; gap: 6px;
+      margin-top: 8px; margin-right: 16px; margin-bottom: 4px;
+    }
+    canvas {
+      background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px;
+      display: block;
+    }
+    .chart-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+    button.save-btn {
+      padding: 4px 12px; background: #26a; color: #fff; border: none;
+      border-radius: 3px; font: 12px monospace; cursor: pointer; align-self: flex-start;
+    }
+    button.save-btn:hover { background: #38b; }
+
+    /* ---- Прочее ------------------------------------------------------------------------------------------------------------------------------ */
+    details { margin-top: 14px; }
+    summary { cursor: pointer; color: #aaa; font-size: 13px; padding: 4px 0; user-select: none; }
+    summary:hover { color: #ccc; }
+    #env-box {
+      margin-bottom: 14px; padding: 10px 14px;
+      background: #1a1a1a; border: 1px solid #333; border-radius: 4px;
+      font-size: 11px; color: #666; display: none;
+    }
+    #env-box details > summary:hover { color: #aaa; }
+    .placeholder { color: #444; font-size: 12px; text-align: center; padding: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Сводка результатов бенчмарка - Потоковая передача мипов с управлением бюджетом</h1>
+  <p>Загрузите JSON-экспорты бенчмарка из Демо 14 для визуализации всех результатов.</p>
+
+  <div id="load-panel">
+    <div class="file-group">
+      <label>Сводный JSON - 1080p (benchmark-summary-*.json)</label>
+      <input type="file" id="summary-file" accept=".json" />
+    </div>
+    <div class="file-group">
+      <label>Сырой JSON - 1080p (benchmark-raw-*.json) - опционально, включает ящичные диаграммы</label>
+      <input type="file" id="raw-file" accept=".json" />
+    </div>
+    <div class="file-group">
+      <label>Сводный JSON - 720p (для сравнения разрешений)</label>
+      <input type="file" id="summary-file-720" accept=".json" />
+    </div>
+    <span id="load-status">Загрузите файлы выше для просмотра результатов.</span>
+  </div>
+
+  <div id="env-box"></div>
+
+  <h2>Таблица 1 - Сравнение конфигураций (среднее ± std по 27 эффективным прогонам)</h2>
+  <table id="t1">
+    <thead>
+      <tr>
+        <th>Конфиг</th>
+        <th>Пик GPU (МБ)</th>
+        <th>Кадр мед. (мс)</th>
+        <th>Кадр p95 (мс)</th>
+        <th>Кадр p99 (мс)</th>
+        <th>Сходимость (мс)</th>
+        <th>PSNR об/кп/ср (дБ)</th>
+        <th>SSIM об/кп/ср</th>
+        <th>Загрузки</th>
+        <th>Вытеснения</th>
+        <th>Загружено%</th>
+      </tr>
+    </thead>
+    <tbody id="t1-body">
+      <tr><td colspan="11" class="placeholder">Данные не загружены</td></tr>
+    </tbody>
+  </table>
+
+  <h2>График 1 - Пиковая память GPU (МБ)</h2>
+  <div class="chart-row">
+    <div class="chart-wrap">
+      <canvas id="chart-memory" width="560" height="300"></canvas>
+      <button class="save-btn" onclick="saveChart('chart-memory','memory-chart.png')">Сохранить PNG</button>
+    </div>
+  </div>
+
+  <h2>График 2 - Распределение времени кадра (мс)</h2>
+  <div class="chart-row">
+    <div class="chart-wrap">
+      <canvas id="chart-frametimes" width="700" height="320"></canvas>
+      <button class="save-btn" onclick="saveChart('chart-frametimes','frametimes-chart.png')">Сохранить PNG</button>
+    </div>
+  </div>
+  <p id="chart2-note" style="font-size:11px;color:#555">
+    Ящики показывают P25–P75, центральная линия = медиана, усы = P10/P90, точка = P99.
+    Требует сырой JSON для данных по кадрам; иначе использует агрегаты по прогонам.
+  </p>
+
+  <h2>График 3 - Компромисс «качество vs. память» (ключевой рисунок диссертации)</h2>
+  <div class="chart-row">
+    <div class="chart-wrap">
+      <canvas id="chart-scatter" width="520" height="380"></canvas>
+      <button class="save-btn" onclick="saveChart('chart-scatter','quality-memory.png')">Сохранить PNG</button>
+    </div>
+  </div>
+
+  <h2>Таблица 2 - Попарные статистические тесты (знаковые ранги Вилкоксона, α = 0.05)</h2>
+  <table id="t2">
+    <thead>
+      <tr>
+        <th>Метрика</th>
+        <th>Сравнение</th>
+        <th>N</th>
+        <th>W</th>
+        <th>z</th>
+        <th>p-значение</th>
+        <th>Знач.</th>
+        <th>Направление</th>
+        <th>Эффект r</th>
+      </tr>
+    </thead>
+    <tbody id="t2-body">
+      <tr><td colspan="9" class="placeholder">Данные не загружены</td></tr>
+    </tbody>
+  </table>
+
+  <h2>График 4 - Вытеснения при орбите камеры (требует сырой JSON)</h2>
+  <p style="font-size:11px;color:#555">
+    Количество вытеснений по кадрам, усреднённое по 27 эффективным прогонам, во время 300-кадрового прохода камеры.
+    Ненулевые вытеснения подтверждают, что LRU-управление бюджетом активно работает при жёстких ограничениях.
+    Требует сырой JSON; серый если не загружен.
+  </p>
+  <div class="chart-row">
+    <div class="chart-wrap">
+      <canvas id="chart-evictions" width="700" height="280"></canvas>
+      <button class="save-btn" onclick="saveChart('chart-evictions','evictions-orbit.png')">Сохранить PNG</button>
+    </div>
+  </div>
+
+  <h2>Таблица 2б - Сводка динамической орбиты камеры (среднее ± std)</h2>
+  <table id="t2b">
+    <thead>
+      <tr>
+        <th>Конфиг</th>
+        <th>Вытеснений на орбите</th>
+        <th>Загрузок на орбите</th>
+        <th>Пик пам. (МБ)</th>
+        <th>Кадр мед. (мс)</th>
+        <th>Кадр p99 (мс)</th>
+        <th>Итог. PSNR (дБ)</th>
+        <th>Итог. SSIM</th>
+      </tr>
+    </thead>
+    <tbody id="t2b-body">
+      <tr><td colspan="8" class="placeholder">Данные не загружены</td></tr>
+    </tbody>
+  </table>
+
+  <h2>График 5 - Сравнение разрешений: пиковая память 1080p vs 720p (МБ)</h2>
+  <p style="font-size:11px;color:#555">
+    Демонстрирует исправление Фазы 7.2: при 720p система запрашивает в среднем более грубые мипы, что снижает пиковую память.
+    Загрузите сводный JSON 720p выше для активации этого графика.
+  </p>
+  <div class="chart-row">
+    <div class="chart-wrap">
+      <canvas id="chart-resolution" width="560" height="300"></canvas>
+      <button class="save-btn" onclick="saveChart('chart-resolution','resolution-comparison.png')">Сохранить PNG</button>
+    </div>
+  </div>
+
+  <details id="raw-details">
+    <summary>Таблица 3 - Сырые данные по прогонам (требует сырой JSON)</summary>
+    <table id="t3">
+      <thead>
+        <tr>
+          <th>Конфиг</th><th>Прогон</th><th>Пам. (МБ)</th>
+          <th>Мед. кадр (мс)</th><th>P99 кадр (мс)</th>
+          <th>Сход. (мс)</th>
+          <th>PSNR об</th><th>PSNR кп</th><th>PSNR ср</th>
+          <th>SSIM об</th>
+          <th>Загрузки</th><th>Вытеснения</th>
+        </tr>
+      </thead>
+      <tbody id="t3-body">
+        <tr><td colspan="12" class="placeholder">Сырые данные не загружены</td></tr>
+      </tbody>
+    </table>
+  </details>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

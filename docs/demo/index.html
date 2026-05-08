@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebGPU Texture Streaming - Interactive Demo</title>
+  <style>
+    :root {
+      --bg-primary:   #0f0f1a;
+      --bg-secondary: #1a1a2e;
+      --bg-control:   #16213e;
+      --text-primary: #e0e0e0;
+      --text-dim:     #aaa;
+      --text-muted:   #666;
+      --accent:       #4a9eff;
+      --accent-glow:  rgba(74, 158, 255, 0.12);
+      --border:       #2a2a3e;
+      --error:        #ff6b6b;
+      --ok:           #6bffb8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ---- Header ------------------------------------------------------------------------------------------------------------------------------ */
+    #hdr {
+      padding: 10px 20px 9px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+    }
+    #hdr h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
+    #hdr p  { font-size: 11px; color: var(--text-muted); }
+
+    /* ---- Canvas area -------------------------------------------------------------------------------------------------------------------- */
+    #canvas-area {
+      flex: 1;
+      position: relative;
+      margin: 10px 14px 0;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #080810;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    #main-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Drop overlay */
+    #drop-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(8, 8, 16, 0.82);
+      border: 2px dashed var(--accent);
+      border-radius: 7px;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      color: var(--accent);
+      pointer-events: none;
+      letter-spacing: 0.02em;
+    }
+    #drop-overlay.active { display: flex; }
+
+    /* Stats overlay */
+    #stats-panel {
+      display: none;
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(12, 12, 24, 0.9);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 11px;
+      min-width: 190px;
+      pointer-events: none;
+    }
+    #stats-panel.visible { display: block; }
+    .s-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 2px 0;
+    }
+    .s-lbl { color: var(--text-muted); }
+    .s-val { color: var(--accent); font-variant-numeric: tabular-nums; }
+    .s-sep { border-top: 1px solid var(--border); margin: 5px 0; }
+
+    /* Loading overlay */
+    #loading-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(8, 8, 16, 0.65);
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      border-radius: 7px;
+    }
+    #loading-overlay.active { display: flex; }
+    #loading-msg  { color: var(--text-dim); font-size: 12px; }
+    #loading-track { width: 180px; height: 2px; background: var(--border); border-radius: 1px; }
+    #loading-bar  { height: 2px; background: var(--accent); border-radius: 1px; width: 0%; transition: width 0.12s; }
+
+    /* WebGPU error */
+    #webgpu-error {
+      display: none;
+      position: absolute;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      text-align: center;
+      padding: 40px;
+    }
+    #webgpu-error.active { display: flex; }
+    #webgpu-error h2 { font-size: 17px; color: var(--error); }
+    #webgpu-error p  { font-size: 12px; color: var(--text-muted); max-width: 380px; }
+
+    /* ---- Controls bar ------------------------------------------------------------------------------------------------------------------ */
+    #controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      background: var(--bg-control);
+      margin: 8px 14px 0;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    select, button, .file-btn {
+      font-family: inherit;
+      font-size: 12px;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 11px;
+      cursor: pointer;
+      transition: border-color 0.12s, background 0.12s;
+      line-height: 1.4;
+      display: inline-block;
+    }
+    select:hover, button:hover:not(:disabled), .file-btn:hover {
+      border-color: var(--accent);
+      background: var(--accent-glow);
+    }
+    button:disabled { opacity: 0.4; cursor: default; }
+    input[type="file"] { display: none; }
+
+    .ctrl-sep {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    #stats-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    #stats-toggle input {
+      accent-color: var(--accent);
+      width: 13px;
+      height: 13px;
+      cursor: pointer;
+    }
+    #stats-toggle span { color: var(--text-muted); font-size: 12px; }
+
+    /* ---- Info bar -------------------------------------------------------------------------------------------------------------------------- */
+    #info-bar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 6px 14px 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .ib-item  { display: flex; align-items: center; gap: 4px; }
+    .ib-lbl   { color: var(--text-muted); }
+    .ib-val   { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    .ib-val.err { color: var(--error); }
+    .ib-val.ok  { color: var(--ok); }
+  </style>
+  <script type="module" src="./assets/index-PqgUSZ4t.js"></script>
+</head>
+<body>
+
+  <div id="hdr">
+    <h1>WebGPU Texture Streaming - Interactive Demo</h1>
+    <p>Master's Thesis · 2026</p>
+  </div>
+
+  <div id="canvas-area">
+    <canvas id="main-canvas"></canvas>
+
+    <div id="drop-overlay">
+      Drop .glb &nbsp;·&nbsp; .obj &nbsp;·&nbsp; .stl &nbsp; file here
+    </div>
+
+    <div id="stats-panel">
+      <div class="s-row"><span class="s-lbl">FPS</span>       <span class="s-val" id="sv-fps">-</span></div>
+      <div class="s-row"><span class="s-lbl">Frame P99</span> <span class="s-val" id="sv-p99">-</span></div>
+      <div class="s-sep"></div>
+      <div class="s-row"><span class="s-lbl">GPU Memory</span><span class="s-val" id="sv-mem">-</span></div>
+      <div class="s-row"><span class="s-lbl">Budget</span>    <span class="s-val" id="sv-budget">-</span></div>
+      <div class="s-sep"></div>
+      <div class="s-row"><span class="s-lbl">Textures</span>  <span class="s-val" id="sv-tex">-</span></div>
+      <div class="s-row"><span class="s-lbl">Streaming</span> <span class="s-val" id="sv-stream">-</span></div>
+    </div>
+
+    <div id="loading-overlay">
+      <span id="loading-msg">Loading…</span>
+      <div id="loading-track"><div id="loading-bar"></div></div>
+    </div>
+
+    <div id="webgpu-error">
+      <h2>WebGPU Not Available</h2>
+      <p>This demo requires WebGPU support.<br>Please use <strong>Chrome 120+</strong> or <strong>Edge 120+</strong>.</p>
+    </div>
+  </div>
+
+  <div id="controls">
+    <select id="scene-select">
+      <option value="25">Procedural Grid (25 objects)</option>
+      <option value="100">Procedural Grid (100 objects)</option>
+      <option value="200" selected>Procedural Grid (200 objects)</option>
+    </select>
+
+    <button id="load-scene-btn" disabled>Load Scene</button>
+
+    <div class="ctrl-sep"></div>
+
+    <label class="file-btn" for="file-input">Open 3D Model</label>
+    <input type="file" id="file-input" accept=".glb,.gltf,.obj,.stl" />
+
+    <div class="ctrl-sep"></div>
+
+    <label id="stats-toggle">
+      <input type="checkbox" id="stats-check" />
+      <span>Show stats</span>
+    </label>
+  </div>
+
+  <div id="info-bar">
+    <div class="ib-item"><span class="ib-lbl">Format:</span>    <span class="ib-val" id="ib-format">-</span></div>
+    <div class="ib-item"><span class="ib-lbl">Triangles:</span> <span class="ib-val" id="ib-tris">-</span></div>
+    <div class="ib-item"><span class="ib-lbl">Meshes:</span>    <span class="ib-val" id="ib-meshes">-</span></div>
+    <div class="ib-item"><span class="ib-lbl">Status:</span>    <span class="ib-val" id="ib-status">Initializing…</span></div>
+  </div>
+
+</body>
+</html>

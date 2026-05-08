@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Demo 18 - Sampler Coherence Verification</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: #111; color: #ccc; font: 12px/1.5 monospace; overflow: hidden; width: 100vw; height: 100vh; }
+
+    #layout {
+      display: flex;
+      flex-direction: column;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #top-bar {
+      padding: 8px 12px;
+      background: #1a1a1a;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-shrink: 0;
+    }
+    #top-bar h1 { font-size: 13px; color: #fff; }
+    #tier-clamp-display {
+      font-size: 13px;
+      padding: 3px 10px;
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 4px;
+    }
+    #tier-clamp-val { color: #ff8; font-weight: bold; }
+    #elapsed { color: #888; }
+
+    button#evict-btn {
+      padding: 4px 12px;
+      background: #a33;
+      color: #fff;
+      border: none;
+      border-radius: 3px;
+      font: 12px monospace;
+      cursor: pointer;
+    }
+    button#evict-btn:hover { background: #c44; }
+
+    #canvas-area { flex: 1; position: relative; min-height: 0; }
+    #c { width: 100%; height: 100%; display: block; }
+
+    #overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+    }
+
+    #bottom-panel {
+      height: 130px;
+      flex-shrink: 0;
+      background: #161616;
+      border-top: 1px solid #333;
+      padding: 8px 12px;
+      overflow: hidden;
+    }
+    #bottom-panel h2 { font-size: 11px; color: #888; margin-bottom: 6px; }
+    #timeline-canvas { display: block; }
+
+    .legend { font-size: 10px; color: #666; margin-top: 4px; }
+    .legend span { margin-right: 12px; }
+  </style>
+</head>
+<body>
+  <div id="layout">
+    <div id="top-bar">
+      <h1>Demo 18 - Sampler Coherence Verification (Phase 7.6)</h1>
+      <div id="tier-clamp-display">
+        Tier LOD MinClamp: <span id="tier-clamp-val">-</span>
+        &nbsp;|&nbsp; Tier-wide max(residentMip) = <span id="tier-max-val">-</span>
+      </div>
+      <div id="elapsed">t = <span id="elapsed-val">0.0</span>s</div>
+      <button id="evict-btn">Force Evict Object 4</button>
+      <div id="status" style="color:#888;font-size:11px;">Initializing…</div>
+    </div>
+
+    <div id="canvas-area">
+      <canvas id="c"></canvas>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div id="bottom-panel">
+      <h2>Streaming Timeline - horizontal bar = mips loaded over time (coarse→fine)</h2>
+      <canvas id="timeline-canvas" width="1200" height="90"></canvas>
+      <div class="legend">
+        <span>■ <span style="color:#e66">mip 0 (finest)</span></span>
+        <span>■ <span style="color:#ea6">mip 1</span></span>
+        <span>■ <span style="color:#ee6">mip 2</span></span>
+        <span>■ <span style="color:#6e6">mip 3</span></span>
+        <span>■ <span style="color:#6ee">mip 4</span></span>
+        <span>■ <span style="color:#66f">mip 5</span></span>
+        <span>■ <span style="color:#96f">mip 6</span></span>
+        <span>■ <span style="color:#d6d">mip 7</span></span>
+        <span>■ <span style="color:#ccc">mip 8 (coarsest)</span></span>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

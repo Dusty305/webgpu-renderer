@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Демо 17 - Исправление согласованности lodMinClamp-семплера</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #111; color: #eee; font-family: monospace; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 70vh; }
+    #overlay {
+      position: fixed; top: 0; left: 0; right: 0;
+      background: rgba(0,0,0,.85); padding: 8px 12px;
+      font-size: 13px; pointer-events: none;
+      display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;
+    }
+    .tex-col { display: flex; flex-direction: column; gap: 3px; min-width: 140px; }
+    .tex-col h4 { color: #adf; font-size: 12px; }
+    .path-hw   { color: #6f6; }
+    .path-lod  { color: #fa0; }
+    #global { background: #222; padding: 6px 10px; border-radius: 4px; }
+    #info-bar {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: rgba(0,0,0,.8); padding: 6px 12px;
+      font-size: 12px; color: #aaa;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="overlay">
+    <div id="global">
+      <div>Общий lodMinClamp уровня: <span id="g-clamp">-</span></div>
+      <div>Вычислен как max(residentMip) по всем 4 текстурам</div>
+    </div>
+    <div class="tex-col" id="col0"><h4>Tex 0 (200мс/мип)</h4></div>
+    <div class="tex-col" id="col1"><h4>Tex 1 (500мс/мип)</h4></div>
+    <div class="tex-col" id="col2"><h4>Tex 2 (1000мс/мип)</h4></div>
+    <div class="tex-col" id="col3"><h4>Tex 3 (статичная)</h4></div>
+  </div>
+  <div id="info-bar">
+    Демо 17: Исправление согласованности lodMinClamp - 4 текстуры в одном уровне с разной скоростью потока.
+    Tex 0–2 постепенно резче; Tex 3 остаётся грубой. Никаких артефактов в любой момент.
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
