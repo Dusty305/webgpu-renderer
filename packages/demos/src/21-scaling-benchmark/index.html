@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Демо 21 - Бенчмарк масштабирования draw calls</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: #111; color: #ccc; font: 13px/1.6 monospace; padding: 20px; min-height: 100%; }
+    h1  { color: #fff; font-size: 16px; margin-bottom: 4px; }
+    h2  { color: #aaa; font-size: 13px; margin: 16px 0 6px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+    p   { color: #888; margin-bottom: 10px; font-size: 12px; }
+
+    #controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    button {
+      padding: 7px 16px; background: #2a6; color: #fff; border: none;
+      border-radius: 4px; font: 13px monospace; cursor: pointer;
+    }
+    button:disabled { background: #444; color: #666; cursor: default; }
+    .dl-btn { background: #26a; }
+
+    #canvas-wrap {
+      margin-bottom: 14px; border: 1px solid #333; border-radius: 4px; overflow: hidden;
+      display: inline-block; position: relative;
+    }
+    #canvas-wrap canvas { display: block; }
+    #canvas-overlay {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.55); color: #aaa; font-size: 13px; pointer-events: none;
+    }
+
+    #progress-box {
+      margin-bottom: 14px; padding: 10px 14px;
+      background: #1a1a1a; border: 1px solid #333; border-radius: 4px;
+    }
+    #progress-label { font-size: 12px; color: #aaa; margin-bottom: 6px; }
+    #progress-bar-wrap { width: 100%; height: 8px; background: #2a2a2a; border-radius: 4px; overflow: hidden; }
+    #progress-bar { height: 100%; background: #2a6; transition: width 0.2s; width: 0%; }
+    #eta { font-size: 11px; color: #666; margin-top: 4px; }
+
+    #env-box {
+      margin-bottom: 14px; padding: 10px 14px;
+      background: #1a1a1a; border: 1px solid #333; border-radius: 4px;
+      font-size: 11px; color: #666;
+    }
+
+    table { border-collapse: collapse; width: auto; margin-top: 8px; font-size: 12px; }
+    th {
+      background: #1e1e1e; color: #888; padding: 5px 14px;
+      text-align: right; font-weight: normal;
+      border-bottom: 1px solid #333; white-space: nowrap;
+    }
+    th:first-child { text-align: left; }
+    td { padding: 5px 14px; border-bottom: 1px solid #1a1a1a; white-space: nowrap; text-align: right; }
+    td:first-child { text-align: left; color: #fff; }
+    tr:hover td { background: #161616; }
+    .val  { color: #cfc; }
+    .std  { color: #666; font-size: 11px; }
+    .note { color: #555; font-size: 11px; margin-top: 6px; }
+
+    #downloads { display: none; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    #results-section { display: none; }
+
+    #error-box {
+      display: none; margin-bottom: 14px; padding: 10px 14px;
+      background: #2a1a1a; border: 1px solid #633; border-radius: 4px;
+      color: #f88; font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Демо 21 — Бенчмарк масштабирования draw calls</h1>
+  <p>
+    Каждый объект рисуется отдельным вызовом <code>drawIndexed(36, 1, 0, 0, objectIndex)</code>.<br>
+    Объектов: 100 / 500 / 1000 / 5000. На каждый вариант: 3 прогрева + 5 прогонов × 120 кадров.<br>
+    Результат: медиана и P99 времени кадра ± std между прогонами.
+  </p>
+
+  <div id="error-box"></div>
+
+  <div id="env-box">Среда GPU появится здесь после инициализации устройства.</div>
+
+  <div id="controls">
+    <button id="run-btn" disabled>▶ Запустить бенчмарк (~3–5 мин)</button>
+    <span id="status-label" style="font-size:12px;color:#aaa">Инициализация…</span>
+  </div>
+
+  <div id="canvas-wrap">
+    <canvas id="canvas" width="800" height="450"></canvas>
+    <div id="canvas-overlay">Ожидание запуска…</div>
+  </div>
+
+  <div id="progress-box">
+    <div id="progress-label">Idle</div>
+    <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+    <div id="eta"></div>
+  </div>
+
+  <div id="results-section">
+    <h2>Результаты масштабирования draw calls</h2>
+    <table id="results-table">
+      <thead>
+        <tr>
+          <th>Объектов</th>
+          <th>Draw calls</th>
+          <th>Медиана кадра (мс)</th>
+          <th>P99 кадра (мс)</th>
+          <th>Сцена</th>
+        </tr>
+      </thead>
+      <tbody id="results-body"></tbody>
+    </table>
+    <p class="note">
+      Среднее ± std по 5 прогонам × 120 кадров. Прогрев (3 прогона) не учитывается.
+    </p>
+    <div id="downloads">
+      <button id="dl-btn" class="dl-btn" disabled>↓ Скачать JSON</button>
+    </div>
+  </div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
