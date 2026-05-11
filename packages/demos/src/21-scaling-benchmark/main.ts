@@ -287,9 +287,10 @@ async function initGpu(): Promise<{ state: GpuState; gpuLabel: string }> {
   const device = await adapter.requestDevice({ label: "bench-device" });
   device.lost.then(info => showError(`Потеряно GPU-устройство: ${info.message}`));
 
-  const info = await adapter.requestAdapterInfo();
-  const gpuLabel = [info.vendor, info.architecture, info.description]
-    .filter(Boolean).join(" / ") || "GPU";
+  const info = adapter.info ?? await (adapter as unknown as { requestAdapterInfo(): Promise<GPUAdapterInfo> }).requestAdapterInfo().catch(() => null);
+  const gpuLabel = info
+    ? [info.vendor, info.architecture, info.description].filter(Boolean).join(" / ") || "GPU"
+    : "GPU";
 
   const format = navigator.gpu.getPreferredCanvasFormat();
   const gpuCtx = canvasEl.getContext("webgpu") as GPUCanvasContext;
