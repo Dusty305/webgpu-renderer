@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Демо 22 — Жизненный цикл веб-компонента</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: #111; color: #ccc; font: 13px/1.6 monospace; }
+
+    h1  { color: #fff; font-size: 15px; padding: 14px 18px; border-bottom: 1px solid #2a2a2a; }
+    h2  { color: #adf; font-size: 12px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .06em; }
+    p   { color: #888; font-size: 12px; line-height: 1.5; }
+    code { background: #1e1e1e; color: #fa0; padding: 1px 4px; border-radius: 2px; font-size: 11px; }
+
+    .page { display: flex; flex-direction: column; gap: 16px; padding: 16px 18px; max-width: 1100px; }
+
+    /* Info box */
+    .info-box {
+      background: #141420; border: 1px solid #334; border-radius: 4px;
+      padding: 10px 14px; font-size: 12px; color: #99b;
+    }
+    .info-box strong { color: #bbf; }
+
+    /* Error box */
+    #error-box {
+      display: none; background: #2a1111; border: 1px solid #633; border-radius: 4px;
+      padding: 10px 14px; color: #f88; font-size: 12px;
+    }
+
+    /* Section card */
+    .card {
+      background: #161616; border: 1px solid #2a2a2a; border-radius: 6px; padding: 14px 16px;
+    }
+
+    /* Steps */
+    .steps { display: flex; flex-direction: column; gap: 12px; }
+    .step {
+      display: flex; gap: 12px; align-items: flex-start;
+      background: #1a1a1a; border: 1px solid #282828; border-radius: 4px; padding: 10px 12px;
+    }
+    .step.done { border-color: #264; background: #111a12; }
+    .step.active { border-color: #446; background: #12121e; }
+    .step-num {
+      min-width: 22px; height: 22px; border-radius: 50%; border: 1px solid #444;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; color: #666; flex-shrink: 0; margin-top: 1px;
+    }
+    .step.done  .step-num { background: #264; border-color: #3a7; color: #7f7; }
+    .step.active .step-num { background: #223; border-color: #55a; color: #aaf; }
+    .step-body { flex: 1; }
+    .step-title { color: #ddd; font-size: 12px; margin-bottom: 4px; }
+    .step-desc  { color: #666; font-size: 11px; margin-bottom: 8px; }
+
+    /* Buttons */
+    button {
+      padding: 5px 14px; border: none; border-radius: 3px;
+      font: 12px monospace; cursor: pointer; transition: background .15s;
+    }
+    .btn-primary { background: #256; color: #8cf; }
+    .btn-primary:hover:not(:disabled) { background: #2a6a; }
+    .btn-primary:disabled { background: #1e2a33; color: #456; cursor: default; }
+    .btn-danger  { background: #522; color: #f88; }
+    .btn-danger:hover:not(:disabled) { background: #633; }
+    .btn-danger:disabled { background: #2a1a1a; color: #644; cursor: default; }
+    .btn-neutral { background: #222; color: #aaa; }
+    .btn-neutral:hover:not(:disabled) { background: #2a2a2a; }
+    .btn-neutral:disabled { background: #1a1a1a; color: #444; cursor: default; }
+
+    /* Memory input row */
+    .mem-row {
+      display: flex; align-items: center; gap: 8px; margin-top: 8px;
+    }
+    .mem-row label { font-size: 11px; color: #888; white-space: nowrap; }
+    .mem-input {
+      width: 80px; background: #111; border: 1px solid #333; border-radius: 3px;
+      color: #ffe; font: 12px monospace; padding: 3px 6px; text-align: right;
+    }
+    .mem-input:focus { outline: none; border-color: #556; }
+    .mem-unit { font-size: 11px; color: #666; }
+    .mem-hint { font-size: 11px; color: #556; }
+
+    /* Status chip */
+    .chip {
+      display: inline-block; padding: 2px 8px; border-radius: 10px;
+      font-size: 11px; background: #1e1e1e; color: #666; border: 1px solid #2a2a2a;
+    }
+    .chip.ok     { background: #132013; color: #5c5; border-color: #254; }
+    .chip.busy   { background: #131320; color: #88f; border-color: #335; }
+    .chip.error  { background: #200; color: #f66; border-color: #600; }
+    .chip.warn   { background: #201500; color: #fa0; border-color: #530; }
+
+    /* Progress bar */
+    .progress-wrap { height: 6px; background: #222; border-radius: 3px; overflow: hidden; margin-top: 8px; }
+    .progress-bar  { height: 100%; background: #369; transition: width .3s; width: 0; }
+
+    /* Canvas container */
+    .canvas-host {
+      background: #0a0a0a; border: 1px solid #222; border-radius: 4px;
+      overflow: hidden; position: relative;
+    }
+    .canvas-label {
+      position: absolute; top: 6px; left: 8px; font-size: 11px; color: #444;
+      pointer-events: none; z-index: 10;
+    }
+    .canvas-placeholder {
+      display: flex; align-items: center; justify-content: center;
+      color: #333; font-size: 12px;
+    }
+
+    /* Results table */
+    .result-table { border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 4px; }
+    .result-table th {
+      background: #1a1a1a; color: #777; padding: 5px 12px; text-align: left;
+      border-bottom: 1px solid #2a2a2a; font-weight: normal; white-space: nowrap;
+    }
+    .result-table td { padding: 5px 12px; border-bottom: 1px solid #1d1d1d; }
+    .result-table td:last-child { color: #ffe066; text-align: right; }
+    .result-table tr:last-child td { color: #6f9; border-bottom: none; }
+    .result-table .pending { color: #444; font-style: italic; }
+
+    /* Two-column layout for multi-instance test */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .two-col .canvas-host { height: 200px; }
+
+    /* Log box */
+    .log-box {
+      background: #0d0d0d; border: 1px solid #222; border-radius: 3px;
+      padding: 8px 10px; height: 100px; overflow-y: auto;
+      font-size: 11px; color: #777; font-family: monospace;
+    }
+    .log-box .log-ok   { color: #5c5; }
+    .log-box .log-warn { color: #fa0; }
+    .log-box .log-err  { color: #f66; }
+
+    /* Inline row */
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+
+    /* Resize slider */
+    input[type=range] { accent-color: #369; width: 120px; }
+
+    /* Single canvas host sizes */
+    #lc-canvas-host  { height: 220px; width: 340px; }
+    #mi-canvas-a { height: 200px; }
+    #mi-canvas-b { height: 200px; }
+    #rs-canvas-host { height: 200px; width: 400px; transition: width .3s, height .3s; }
+    #dl-canvas-host { height: 200px; width: 340px; }
+  </style>
+</head>
+<body>
+  <h1>Демо 22 — Жизненный цикл веб-компонента &lt;webgpu-canvas-streaming&gt;</h1>
+
+  <div class="page">
+    <div id="error-box"></div>
+
+    <div class="info-box">
+      <strong>Методика измерений.</strong>
+      GPU-память измеряется вручную через
+      <strong>Chrome Task Manager</strong> (<code>Shift+Esc</code> → столбец «GPU Memory»).
+      В каждой контрольной точке введите значение из Task Manager в поле «МБ» и нажмите «Зафиксировать».
+      Таблица 4.6 заполняется автоматически.
+    </div>
+
+    <!-- ========================= РАЗДЕЛ 1: основной тест ========================= -->
+    <div class="card">
+      <h2>§4.4.1 Тест жизненного цикла (Таблица 4.6)</h2>
+
+      <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:14px;">
+        <div id="lc-canvas-host" class="canvas-host">
+          <div class="canvas-label" id="lc-canvas-label">нет элемента</div>
+          <div class="canvas-placeholder" id="lc-placeholder" style="height:100%;width:100%">
+            — элемент ещё не создан —
+          </div>
+        </div>
+
+        <div style="flex:1;min-width:200px;">
+          <div class="steps" id="steps-container">
+
+            <!-- Шаг 1 -->
+            <div class="step active" id="step1">
+              <div class="step-num">1</div>
+              <div class="step-body">
+                <div class="step-title">Базовый уровень — до создания элемента</div>
+                <div class="step-desc">Откройте Chrome Task Manager (Shift+Esc), найдите строку этой вкладки в столбце «GPU Memory» и введите значение.</div>
+                <div class="mem-row">
+                  <label>GPU память:</label>
+                  <input type="number" class="mem-input" id="inp-baseline" min="0" step="0.1" placeholder="0.0">
+                  <span class="mem-unit">МБ</span>
+                </div>
+                <div class="row">
+                  <button class="btn-primary" id="btn-step1">Зафиксировать базовый уровень</button>
+                  <span id="chip-step1" class="chip">ожидание</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Шаг 2 -->
+            <div class="step" id="step2">
+              <div class="step-num">2</div>
+              <div class="step-body">
+                <div class="step-title">После создания элемента и загрузки сцены</div>
+                <div class="step-desc">Нажмите кнопку — элемент будет создан и вставлен в DOM. Дождитесь конвергенции (статус «готов»), затем снимите показание.</div>
+                <div class="row">
+                  <button class="btn-primary" id="btn-create" disabled>Создать элемент и загрузить сцену</button>
+                  <span id="chip-step2" class="chip">ожидание</span>
+                </div>
+                <div class="mem-row" style="margin-top:10px;">
+                  <label>GPU память:</label>
+                  <input type="number" class="mem-input" id="inp-after-create" min="0" step="0.1" placeholder="—" disabled>
+                  <span class="mem-unit">МБ</span>
+                </div>
+                <div class="row">
+                  <button class="btn-primary" id="btn-step2" disabled>Зафиксировать</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Шаг 3 -->
+            <div class="step" id="step3">
+              <div class="step-num">3</div>
+              <div class="step-body">
+                <div class="step-title">После удаления элемента из DOM</div>
+                <div class="step-desc">Нажмите «Удалить» — элемент будет извлечён из DOM, <code>disconnectedCallback()</code> освободит все GPU-ресурсы. Пауза 2 с для завершения асинхронных операций.</div>
+                <div class="row">
+                  <button class="btn-danger" id="btn-remove" disabled>Удалить из DOM</button>
+                  <span id="chip-step3" class="chip">ожидание</span>
+                </div>
+                <div class="mem-row" style="margin-top:10px;">
+                  <label>GPU память:</label>
+                  <input type="number" class="mem-input" id="inp-after-remove" min="0" step="0.1" placeholder="—" disabled>
+                  <span class="mem-unit">МБ</span>
+                </div>
+                <div class="row">
+                  <button class="btn-primary" id="btn-step3" disabled>Зафиксировать</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Шаг 4 -->
+            <div class="step" id="step4">
+              <div class="step-num">4</div>
+              <div class="step-body">
+                <div class="step-title">После 10 циклов «создание → загрузка → пауза → удаление»</div>
+                <div class="step-desc">Автоматически выполняет 10 итераций. Каждый цикл: создание → ожидание gpu-ready + loadScene → 2 с → удаление → 2 с пауза.</div>
+                <div class="row">
+                  <button class="btn-primary" id="btn-cycles" disabled>Запустить 10 циклов</button>
+                  <span id="chip-step4" class="chip">ожидание</span>
+                </div>
+                <div class="progress-wrap" id="cycles-progress-wrap" style="display:none">
+                  <div class="progress-bar" id="cycles-bar"></div>
+                </div>
+                <div id="cycles-label" style="font-size:11px;color:#666;margin-top:4px;display:none">0 / 10</div>
+                <div class="mem-row" style="margin-top:10px;">
+                  <label>GPU память:</label>
+                  <input type="number" class="mem-input" id="inp-after-cycles" min="0" step="0.1" placeholder="—" disabled>
+                  <span class="mem-unit">МБ</span>
+                </div>
+                <div class="row">
+                  <button class="btn-primary" id="btn-step4" disabled>Зафиксировать</button>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /steps -->
+        </div><!-- /right column -->
+      </div>
+
+      <!-- Таблица 4.6 -->
+      <div id="results-section">
+        <h2 style="margin-top:10px;">Таблица 4.6 — Потребление GPU-памяти при динамическом управлении элементом</h2>
+        <table class="result-table">
+          <thead>
+            <tr><th>Метрика</th><th>Значение</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>GPU-память до создания (базовый уровень)</td><td id="r-baseline" class="pending">—</td></tr>
+            <tr><td>GPU-память после создания и загрузки</td><td id="r-after-create" class="pending">—</td></tr>
+            <tr><td>GPU-память после удаления элемента</td><td id="r-after-remove" class="pending">—</td></tr>
+            <tr><td>GPU-память после 10 циклов</td><td id="r-after-cycles" class="pending">—</td></tr>
+            <tr><td>Дельта (10 циклов − базовый уровень)</td><td id="r-delta" class="pending">—</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:6px;font-size:11px;color:#555;" id="verdict-text"></p>
+      </div>
+
+    </div><!-- /card -->
+
+    <!-- ========================= РАЗДЕЛ 2: множественные экземпляры ========================= -->
+    <div class="card">
+      <h2>§4.4.2 Множественные экземпляры</h2>
+      <p style="margin-bottom:10px;">
+        Два независимых элемента на одной странице. Каждый получает собственное GPU-устройство.
+        Удаление одного не должно влиять на работу второго.
+      </p>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="btn-primary" id="btn-mi-create">Создать 2 экземпляра</button>
+        <button class="btn-danger" id="btn-mi-remove-a" disabled>Удалить первый</button>
+        <button class="btn-danger" id="btn-mi-remove-b" disabled>Удалить второй</button>
+        <button class="btn-neutral" id="btn-mi-reset">Сбросить</button>
+      </div>
+      <div class="two-col">
+        <div>
+          <div style="font-size:11px;color:#666;margin-bottom:4px;">Экземпляр A</div>
+          <div class="canvas-host" id="mi-canvas-a">
+            <div class="canvas-placeholder" style="height:100%;width:100%;">— ожидание —</div>
+          </div>
+          <div style="font-size:11px;color:#555;margin-top:4px;" id="mi-status-a">не создан</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:#666;margin-bottom:4px;">Экземпляр B</div>
+          <div class="canvas-host" id="mi-canvas-b">
+            <div class="canvas-placeholder" style="height:100%;width:100%;">— ожидание —</div>
+          </div>
+          <div style="font-size:11px;color:#555;margin-top:4px;" id="mi-status-b">не создан</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================= РАЗДЕЛ 3: изменение размера ========================= -->
+    <div class="card">
+      <h2>§4.4.3 Устойчивость к изменению размера</h2>
+      <p style="margin-bottom:10px;">
+        ResizeObserver автоматически перенастраивает контекст при изменении размеров элемента.
+        Используйте ползунки для изменения ширины и высоты контейнера.
+      </p>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="btn-primary" id="btn-rs-create">Создать элемент</button>
+        <button class="btn-danger" id="btn-rs-remove" disabled>Удалить</button>
+        <label style="font-size:11px;color:#888;">Ширина:</label>
+        <input type="range" id="rs-width"  min="200" max="700" value="400" disabled>
+        <span id="rs-width-val"  style="font-size:11px;color:#ffe066;min-width:40px">400px</span>
+        <label style="font-size:11px;color:#888;">Высота:</label>
+        <input type="range" id="rs-height" min="120" max="400" value="200" disabled>
+        <span id="rs-height-val" style="font-size:11px;color:#ffe066;min-width:40px">200px</span>
+        <button class="btn-neutral" id="btn-rs-fullscreen" disabled>⛶ Fullscreen</button>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div class="canvas-host" id="rs-canvas-host">
+          <div class="canvas-placeholder" style="height:100%;width:100%;">— ожидание —</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:#666;margin-bottom:4px;">Лог событий resize:</div>
+          <div class="log-box" id="rs-log">ожидание создания элемента…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================= РАЗДЕЛ 4: потеря устройства ========================= -->
+    <div class="card">
+      <h2>§4.4.4 Восстановление после потери устройства</h2>
+      <p style="margin-bottom:10px;">
+        Потеря устройства инициируется через Chrome DevTools → вкладка «GPU» → кнопка «Lose context».
+        Модуль должен: остановить цикл рендеринга, сгенерировать событие <code>webgpu-lost</code>,
+        сохранить последний кадр как статичное изображение.
+      </p>
+      <div class="info-box" style="margin-bottom:10px;">
+        <strong>Инструкция:</strong>
+        1. Нажмите «Создать элемент».
+        2. Откройте DevTools (F12) → вкладка Rendering или введите в консоли:
+        <code>document.getElementById("dl-el")?.dispatchEvent(new Event("webgpu-lost"))</code>
+        либо используйте <code>chrome://gpu</code> → «Force lose context».
+        3. Наблюдайте за событием <code>webgpu-lost</code> в логе.
+      </div>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="btn-primary" id="btn-dl-create">Создать элемент</button>
+        <button class="btn-danger" id="btn-dl-remove" disabled>Удалить</button>
+        <button class="btn-neutral" id="btn-dl-simulate" disabled title="Отправляет webgpu-lost на элемент (только для демонстрации, не вызывает реальную потерю GPU)">Симулировать потерю (soft)</button>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div class="canvas-host" id="dl-canvas-host">
+          <div class="canvas-placeholder" style="height:100%;width:100%;">— ожидание —</div>
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:11px;color:#666;margin-bottom:4px;">Лог событий:</div>
+          <div class="log-box" id="dl-log">ожидание создания элемента…</div>
+          <div style="font-size:11px;color:#555;margin-top:6px;" id="dl-status">не создан</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /page -->
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
