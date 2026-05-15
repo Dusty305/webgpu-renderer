@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>webgpu-streaming — примеры интеграции</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0e0e0e; color: #ddd; font-family: system-ui, sans-serif;
+      min-height: 100dvh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 32px 16px; gap: 32px;
+    }
+    h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: -.01em; }
+    .subtitle { font-size: .85rem; opacity: .45; text-align: center; max-width: 520px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px; width: 100%; max-width: 800px;
+    }
+    a.card {
+      display: flex; flex-direction: column; gap: 6px;
+      background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px;
+      padding: 20px 24px; text-decoration: none; color: inherit;
+      transition: border-color .15s, background .15s;
+    }
+    a.card:hover { background: #222; border-color: #3a3aff88; }
+    a.card .tag {
+      font-size: .65rem; text-transform: uppercase; letter-spacing: .12em;
+      color: #6060ff; font-weight: 700;
+    }
+    a.card .title { font-size: 1rem; font-weight: 600; }
+    a.card .desc { font-size: .78rem; opacity: .5; line-height: 1.5; }
+    a.card.featured { border-color: #4444ff55; background: #13131f; }
+    a.card.featured .tag { color: #8888ff; }
+  </style>
+</head>
+<body>
+  <h1>webgpu-streaming — примеры</h1>
+  <p class="subtitle">
+    Демонстрации интеграции WebGPU-модуля в различные окружения.
+    Не требует отдельного сервера — открывайте как файл или через любой статический сервер.
+  </p>
+
+  <div class="grid">
+    <a class="card featured" href="comparison/index.html">
+      <span class="tag">Таблица 4.4</span>
+      <span class="title">Сравнение интеграционной сложности</span>
+      <span class="desc">
+        Живые рендеры, счётчики LOC, размер бандла — подтверждение утверждений
+        из раздела 4.2 диссертации vs Three.js и Babylon.js.
+      </span>
+    </a>
+
+    <a class="card" href="plain-html/index.html">
+      <span class="tag">HTML / без сборки</span>
+      <span class="title">Plain HTML</span>
+      <span class="desc">
+        Декларативный (<code>&lt;webgpu-canvas-streaming&gt;</code>) и программный
+        подходы в одном файле. IIFE-бандл подключается тегом <code>&lt;script&gt;</code>.
+      </span>
+    </a>
+
+    <a class="card" href="cdn/index.html">
+      <span class="tag">CDN / Script tag</span>
+      <span class="title">CDN / тег скрипта</span>
+      <span class="desc">
+        Эмуляция подключения через unpkg / jsDelivr: один <code>&lt;script src&gt;</code>
+        и несколько строк JS.
+      </span>
+    </a>
+
+    <a class="card" href="vite-vanilla/index.html">
+      <span class="tag">Vite / TypeScript</span>
+      <span class="title">Vite + Vanilla TS</span>
+      <span class="desc">
+        ESM-импорт с полной типизацией. Несколько кубов с разными материалами
+        и статистика кадра.
+      </span>
+    </a>
+
+    <a class="card" href="react/index.html">
+      <span class="tag">React 18</span>
+      <span class="title">React-хук</span>
+      <span class="desc">
+        <code>useWebGPU()</code> — 32 строки, инкапсулирующих инициализацию GPU,
+        освобождение ресурсов и защиту от гонки состояний.
+      </span>
+    </a>
+
+    <a class="card" href="vue/index.html">
+      <span class="tag">Vue 3</span>
+      <span class="title">Vue Composable</span>
+      <span class="desc">
+        <code>useWebGPU()</code> в стиле Composition API. Lifecycle-хуки и
+        реактивная статистика.
+      </span>
+    </a>
+  </div>
+</body>
+</html>

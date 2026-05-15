@@ -1,6 +1,6 @@
 import { createRenderer, detectFormat, parseOBJBuffer, parseSTL } from "@webgpu-streaming/core";
 import type { ParsedMesh } from "@webgpu-streaming/core";
-import type { Renderer, MeshHandle, GeometryDescriptor } from "@webgpu-streaming/gpu-types";
+import type { Renderer, MeshHandle, GeometryDescriptor, TextureHandle } from "@webgpu-streaming/gpu-types";
 
 // ---- DOM refs ------------------------------------------------------------------------------------------------------------------------------------
 
@@ -30,6 +30,7 @@ const ibStatus      = document.getElementById("ib-status")!;
 
 let renderer: Renderer | null = null;
 let currentMeshes: MeshHandle[] = [];
+let currentTextures: TextureHandle[] = [];
 let statsTimer: ReturnType<typeof setInterval> | null = null;
 
 // ---- UI helpers --------------------------------------------------------------------------------------------------------------------------------
@@ -60,7 +61,9 @@ function updateInfoBar(format: string, tris: number, meshCount: number): void {
 
 function clearScene(): void {
   for (const h of currentMeshes) renderer?.removeMesh(h);
+  for (const t of currentTextures) t.destroy();
   currentMeshes = [];
+  currentTextures = [];
 }
 
 function fitCamera(positions: Float32Array[]): void {
@@ -181,17 +184,34 @@ function loadProceduralScene(count: number): void {
   setStatus("Готово");
 }
 
-// ---- Minimal GLB geometry extractor --------------------------------------------------------------------------------------
+// ---- GLB парсер с поддержкой текстур --------------------------------------------------------------------------------------
 
 interface GltfDoc {
   meshes?:      Array<{ primitives: Array<GltfPrimitive> }>;
   accessors?:   GltfAccessor[];
   bufferViews?: GltfBufferView[];
   buffers?:     Array<{ byteLength: number; uri?: string }>;
+  materials?:   Array<{ pbrMetallicRoughness?: { baseColorTexture?: { index: number } } }>;
+  textures?:    Array<{ source?: number }>;
+  images?:      Array<{ bufferView?: number; mimeType?: string; uri?: string }>;
 }
-interface GltfPrimitive { attributes: Record<string, number>; indices?: number }
-interface GltfAccessor  { bufferView?: number; byteOffset?: number; componentType: number; count: number; type: string }
+interface GltfPrimitive  { attributes: Record<string, number>; indices?: number; material?: number }
+interface GltfAccessor   { bufferView?: number; byteOffset?: number; componentType: number; count: number; type: string }
 interface GltfBufferView { buffer: number; byteOffset?: number; byteLength: number; byteStride?: number }
+
+interface GLBPrimResult {
+  positions: Float32Array;
+  normals?:  Float32Array;
+  uvs?:      Float32Array;
+  indices?:  Uint16Array | Uint32Array;
+  imgIdx:    number | null; // индекс в массиве images glTF (null = нет текстуры)
+}
+
+interface GLBSceneResult {
+  primitives: GLBPrimResult[];
+  // raw bytes каждого изображения (null = не удалось извлечь)
+  images: Array<{ data: ArrayBuffer; mimeType: string } | null>;
+}
 
 function glbCompBytes(ct: number): number {
   if (ct === 5120 || ct === 5121) return 1;
@@ -199,7 +219,7 @@ function glbCompBytes(ct: number): number {
   return 4;
 }
 
-function extractGLBMeshes(buffer: ArrayBuffer): GeometryDescriptor[] {
+function extractGLBScene(buffer: ArrayBuffer): GLBSceneResult {
   const dv = new DataView(buffer);
   if (dv.getUint32(0, true) !== 0x46546C67) throw new Error("Not a valid GLB file");
 
@@ -223,8 +243,36 @@ function extractGLBMeshes(buffer: ArrayBuffer): GeometryDescriptor[] {
 
   const accessors   = gltf.accessors   ?? [];
   const bufferViews = gltf.bufferViews ?? [];
+  const materials   = gltf.materials   ?? [];
+  const gltfTextures = gltf.textures   ?? [];
+  const gltfImages  = gltf.images      ?? [];
 
-  function readF32Vec3(accIdx: number): Float32Array | undefined {
+  // ---- Извлечение изображений из бинарного чанка -------------------------------------------------------------------------
+  const images: GLBSceneResult["images"] = gltfImages.map(img => {
+    if (img.bufferView != null) {
+      const bv = bufferViews[img.bufferView];
+      if (!bv || !binBuf) return null;
+      const start = bv.byteOffset ?? 0;
+      return {
+        data: binBuf.slice(start, start + bv.byteLength),
+        mimeType: img.mimeType ?? "image/jpeg",
+      };
+    }
+    if (img.uri?.startsWith("data:")) {
+      const comma = img.uri.indexOf(",");
+      if (comma === -1) return null;
+      const mime = img.uri.slice(5, img.uri.indexOf(";")) || "image/jpeg";
+      const b64  = img.uri.slice(comma + 1);
+      const bin  = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return { data: bytes.buffer as ArrayBuffer, mimeType: mime };
+    }
+    return null; // внешний URI не поддерживается при drag-and-drop
+  });
+
+  // ---- Вспомогательные функции чтения аксессоров -------------------------------------------------------------------------
+  function readVec3(accIdx: number): Float32Array | undefined {
     const acc = accessors[accIdx];
     if (!acc || acc.bufferView == null || acc.type !== "VEC3" || acc.componentType !== 5126) return undefined;
     const bv     = bufferViews[acc.bufferView]!;
@@ -234,9 +282,26 @@ function extractGLBMeshes(buffer: ArrayBuffer): GeometryDescriptor[] {
     if (stride === 12) return new Float32Array(binBuf.slice(start, start + acc.count * 12));
     const out = new Float32Array(acc.count * 3);
     for (let i = 0; i < acc.count; i++) {
-      const s   = start + i * stride;
-      const src = new Float32Array(binBuf, s, 3);
-      out[i*3] = src[0]!; out[i*3+1] = src[1]!; out[i*3+2] = src[2]!;
+      const s = start + i * stride;
+      const v = new Float32Array(binBuf, s, 3);
+      out[i*3] = v[0]!; out[i*3+1] = v[1]!; out[i*3+2] = v[2]!;
+    }
+    return out;
+  }
+
+  function readVec2(accIdx: number): Float32Array | undefined {
+    const acc = accessors[accIdx];
+    if (!acc || acc.bufferView == null || acc.type !== "VEC2" || acc.componentType !== 5126) return undefined;
+    const bv     = bufferViews[acc.bufferView]!;
+    if (!binBuf) return undefined;
+    const start  = (bv.byteOffset ?? 0) + (acc.byteOffset ?? 0);
+    const stride = bv.byteStride ?? 8;
+    if (stride === 8) return new Float32Array(binBuf.slice(start, start + acc.count * 8));
+    const out = new Float32Array(acc.count * 2);
+    for (let i = 0; i < acc.count; i++) {
+      const s = start + i * stride;
+      const v = new Float32Array(binBuf, s, 2);
+      out[i*2] = v[0]!; out[i*2+1] = v[1]!;
     }
     return out;
   }
@@ -254,23 +319,41 @@ function extractGLBMeshes(buffer: ArrayBuffer): GeometryDescriptor[] {
     return undefined;
   }
 
-  const results: GeometryDescriptor[] = [];
+  // ---- Сборка примитивов -----------------------------------------------------------------------------------------
+  const primitives: GLBPrimResult[] = [];
   for (const mesh of gltf.meshes ?? []) {
     for (const prim of mesh.primitives) {
       try {
         const posIdx = prim.attributes["POSITION"];
         if (posIdx == null) continue;
-        const positions = readF32Vec3(posIdx);
+        const positions = readVec3(posIdx);
         if (!positions || positions.length === 0) continue;
-        const normals = prim.attributes["NORMAL"] != null ? readF32Vec3(prim.attributes["NORMAL"]!) : undefined;
+
+        const normIdx = prim.attributes["NORMAL"];
+        const uvIdx   = prim.attributes["TEXCOORD_0"];
+        const normals = normIdx != null ? readVec3(normIdx) : undefined;
+        const uvs     = uvIdx   != null ? readVec2(uvIdx)   : undefined;
         const indices = prim.indices != null ? readIndices(prim.indices) : undefined;
-        results.push({ positions, normals, indices });
+
+        // Определяем индекс изображения через материал → текстуру → источник
+        let imgIdx: number | null = null;
+        if (prim.material != null) {
+          const mat = materials[prim.material];
+          const texIdx = mat?.pbrMetallicRoughness?.baseColorTexture?.index;
+          if (texIdx != null) {
+            const srcIdx = gltfTextures[texIdx]?.source;
+            if (srcIdx != null) imgIdx = srcIdx;
+          }
+        }
+
+        primitives.push({ positions, normals, uvs, indices, imgIdx });
       } catch {
-        // skip malformed primitive
+        // пропускаем повреждённый примитив
       }
     }
   }
-  return results;
+
+  return { primitives, images };
 }
 
 // ---- Load arbitrary 3D file --------------------------------------------------------------------------------------------------------
@@ -283,10 +366,65 @@ async function loadFile(filename: string, buffer: ArrayBuffer): Promise<void> {
   showLoading(`Загрузка ${filename}…`);
 
   try {
-    const ext       = filename.split(".").pop()?.toLowerCase() ?? "";
-    const bufFmt    = detectFormat(buffer);
-    const format    = bufFmt !== "unknown" ? bufFmt : detectFormat(filename);
+    const ext    = filename.split(".").pop()?.toLowerCase() ?? "";
+    const bufFmt = detectFormat(buffer);
+    const format = bufFmt !== "unknown" ? bufFmt : detectFormat(filename);
 
+    // ---- GLB: обрабатываем отдельно, чтобы загрузить текстуры -------------------------------------------------------
+    if (format === "glb") {
+      const { primitives, images } = extractGLBScene(buffer);
+      if (primitives.length === 0) throw new Error("В GLB-файле не найдена геометрия");
+
+      // Загружаем изображения как GPU-текстуры (дедупликация по индексу)
+      const texByImgIdx = new Map<number, TextureHandle>();
+      const validImgs   = images.filter(img => img !== null);
+      if (validImgs.length > 0) showLoading(`Загрузка текстур… 0/${validImgs.length}`, 0);
+
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        if (!img) continue;
+        try {
+          const handle = await renderer.loadTexture(img.data);
+          texByImgIdx.set(i, handle);
+          currentTextures.push(handle);
+        } catch (e) {
+          console.warn(`[showcase] Текстура ${i} не загружена:`, e);
+        }
+        showLoading(
+          `Загрузка текстур… ${texByImgIdx.size}/${validImgs.length}`,
+          texByImgIdx.size / Math.max(validImgs.length, 1),
+        );
+      }
+
+      const allPos: Float32Array[] = [];
+      let tris = 0;
+      let colorIdx = 0;
+      for (const prim of primitives) {
+        const texHandle = prim.imgIdx != null ? texByImgIdx.get(prim.imgIdx) : undefined;
+        const geo: GeometryDescriptor = {
+          positions: prim.positions,
+          normals:   prim.normals,
+          uvs:       prim.uvs,
+          indices:   prim.indices,
+        };
+        const material = texHandle
+          ? { baseColor: texHandle }
+          : { baseColor: MESH_COLORS[colorIdx % MESH_COLORS.length]! };
+        currentMeshes.push(renderer.addMesh(geo, material));
+        allPos.push(prim.positions);
+        tris += Math.floor((prim.indices?.length ?? prim.positions.length / 3) / 3);
+        colorIdx++;
+      }
+
+      fitCamera(allPos);
+      hideLoading();
+      const texInfo = texByImgIdx.size > 0 ? ` · ${texByImgIdx.size} текстур` : "";
+      updateInfoBar(`GLB${texInfo}`, tris, primitives.length);
+      setStatus("Загружено");
+      return;
+    }
+
+    // ---- OBJ / STL ------------------------------------------------------------------------------------------------
     let geos: GeometryDescriptor[] = [];
     let fmtName = "";
 
@@ -296,15 +434,12 @@ async function loadFile(filename: string, buffer: ArrayBuffer): Promise<void> {
     } else if (format === "stl-binary" || format === "stl-ascii") {
       geos    = parseSTL(buffer).meshes.map((m: ParsedMesh) => m.geometry);
       fmtName = "STL";
-    } else if (format === "glb") {
-      geos    = extractGLBMeshes(buffer);
-      fmtName = "GLB";
     } else if (format === "gltf" || ext === "gltf") {
       const text = new TextDecoder().decode(new Uint8Array(buffer));
       const json = JSON.parse(text) as GltfDoc;
       const hasExternal = (json.buffers ?? []).some(b => b.uri && !b.uri.startsWith("data:"));
       if (hasExternal) throw new Error("glTF с внешними зависимостями не поддерживается - используйте .glb");
-      throw new Error("GLTF без встроенной геометрии - используйте формат .glb");
+      throw new Error("glTF без встроенной геометрии - используйте формат .glb");
     } else {
       throw new Error(`Неподдерживаемый формат: .${ext} - поддерживаются: .glb .obj .stl`);
     }
@@ -343,14 +478,11 @@ function startStats(): void {
     const s = renderer.getStats();
     svFps.textContent    = s.fps.toFixed(0);
     svP99.textContent    = `${s.frameTimeP99Ms.toFixed(1)} ms`;
-    svMem.textContent    = s.memoryUsedMB > 0    ? `${s.memoryUsedMB.toFixed(1)} MB`    : "-";
-    svBudget.textContent = s.memoryBudgetMB > 0  ? `${s.memoryBudgetMB.toFixed(0)} MB`  : "-";
-    svTex.textContent    = s.texturesTotal > 0
-      ? `${s.texturesLoaded} / ${s.texturesTotal}`
-      : "-";
-    svStream.textContent = s.texturesTotal > 0
-      ? (s.texturesLoaded >= s.texturesTotal ? "завершён" : "активен")
-      : "-";
+    svMem.textContent    = s.memoryUsedMB > 0   ? `${s.memoryUsedMB.toFixed(1)} MB`   : "-";
+    svBudget.textContent = s.memoryBudgetMB > 0 ? `${s.memoryBudgetMB.toFixed(0)} MB` : "-";
+    svTex.textContent    = s.texturesTotal > 0  ? String(s.texturesLoaded)             : "-";
+    // В этом рендерере нет потокового стриминга — текстуры загружаются полностью
+    svStream.textContent = s.texturesTotal > 0  ? "нет (полная загрузка)"              : "-";
   }, 500);
 }
 

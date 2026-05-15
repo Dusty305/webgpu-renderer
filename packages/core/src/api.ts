@@ -89,6 +89,12 @@ interface MeshGPU {
   indexCount: number;
 }
 
+interface ObjectEntry {
+  meshId: string;
+  color: Float32Array;
+  texId: string | null;
+}
+
 class BuiltinRenderPass {
   private _device: GPUDevice;
   private _pipeline: GPURenderPipeline | null = null;
@@ -96,11 +102,17 @@ class BuiltinRenderPass {
   private _sceneBg: GPUBindGroup | null = null;
   private _objUbo: GPUBuffer | null = null;
   private _objBg: GPUBindGroup | null = null;
+  private _bgl2: GPUBindGroupLayout | null = null;
+  private _whiteTex: GPUTexture | null = null;
+  private _whiteBg: GPUBindGroup | null = null;
+  private _sampler: GPUSampler | null = null;
   private _aspect = 1;
   private _fmt: GPUTextureFormat;
 
-  private readonly _meshes  = new Map<string, MeshGPU>();
-  private readonly _objects = new Map<string, { meshId: string; color: Float32Array }>();
+  private readonly _meshes    = new Map<string, MeshGPU>();
+  private readonly _objects   = new Map<string, ObjectEntry>();
+  private readonly _texGPU    = new Map<string, GPUTexture>();
+  private readonly _texBGs    = new Map<string, GPUBindGroup>();
 
   private readonly _lightDir   = new Float32Array([0.5773, -0.5773, -0.5773]);
   private readonly _lightColor = new Float32Array([1.2, 1.1, 1.0]);
@@ -128,6 +140,28 @@ class BuiltinRenderPass {
     });
     void d.popErrorScope().then((err) => { if (err) console.error("[api] Переполнение памяти GPU при выделении UBO:", err.message); });
 
+    // ---- Дефолтная 1×1 белая текстура (для мешей без текстуры) ---------------------------------------------------------------------------
+    this._whiteTex = d.createTexture({
+      label: "builtin-white-1x1",
+      size: [1, 1, 1],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    d.queue.writeTexture(
+      { texture: this._whiteTex },
+      new Uint8Array([255, 255, 255, 255]),
+      { bytesPerRow: 4 },
+      [1, 1, 1],
+    );
+
+    this._sampler = d.createSampler({
+      magFilter: "linear",
+      minFilter: "linear",
+      mipmapFilter: "linear",
+      addressModeU: "repeat",
+      addressModeV: "repeat",
+    });
+
     // ---- Макеты групп привязок --------------------------------------------------------------------------------------------------
     const bgl0 = d.createBindGroupLayout({
       label: "builtin-bgl0",
@@ -137,6 +171,14 @@ class BuiltinRenderPass {
       label: "builtin-bgl1",
       entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform", hasDynamicOffset: true } }],
     });
+    const bgl2 = d.createBindGroupLayout({
+      label: "builtin-bgl2",
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+      ],
+    });
+    this._bgl2 = bgl2;
 
     this._sceneBg = d.createBindGroup({
       label: "builtin-scene-bg",
@@ -150,11 +192,20 @@ class BuiltinRenderPass {
       entries: [{ binding: 0, resource: { buffer: this._objUbo!, size: OBJ_STRIDE } }],
     });
 
+    this._whiteBg = d.createBindGroup({
+      label: "builtin-white-bg",
+      layout: bgl2,
+      entries: [
+        { binding: 0, resource: this._whiteTex.createView() },
+        { binding: 1, resource: this._sampler },
+      ],
+    });
+
     const module = d.createShaderModule({ label: "builtin-shader", code: BUILTIN_WGSL });
 
     this._pipeline = d.createRenderPipeline({
       label: "builtin-pipeline",
-      layout: d.createPipelineLayout({ bindGroupLayouts: [bgl0, bgl1] }),
+      layout: d.createPipelineLayout({ bindGroupLayouts: [bgl0, bgl1, bgl2] }),
       vertex: {
         module,
         entryPoint: "vs_main",
@@ -202,8 +253,36 @@ class BuiltinRenderPass {
     this._meshes.set(id, { vbo, ibo, indexCount: idxs.length });
   }
 
-  addObject(nodeId: string, meshId: string, color: Float32Array<ArrayBuffer> = new Float32Array([0.7, 0.5, 0.3, 1]) as Float32Array<ArrayBuffer>): void {
-    this._objects.set(nodeId, { meshId, color });
+  registerTexture(id: string, gpuTex: GPUTexture): void {
+    if (!this._bgl2 || !this._sampler) return;
+    const bg = this._device.createBindGroup({
+      label: `builtin-tex-bg-${id}`,
+      layout: this._bgl2,
+      entries: [
+        { binding: 0, resource: gpuTex.createView() },
+        { binding: 1, resource: this._sampler },
+      ],
+    });
+    this._texGPU.set(id, gpuTex);
+    this._texBGs.set(id, bg);
+  }
+
+  destroyTexture(id: string): void {
+    this._texGPU.get(id)?.destroy();
+    this._texGPU.delete(id);
+    this._texBGs.delete(id);
+  }
+
+  private _getTexBg(texId: string | null): GPUBindGroup {
+    if (texId) {
+      const bg = this._texBGs.get(texId);
+      if (bg) return bg;
+    }
+    return this._whiteBg!;
+  }
+
+  addObject(nodeId: string, meshId: string, color: Float32Array<ArrayBuffer> = new Float32Array([0.7, 0.5, 0.3, 1]) as Float32Array<ArrayBuffer>, texId: string | null = null): void {
+    this._objects.set(nodeId, { meshId, color, texId });
   }
 
   removeObject(nodeId: string): void {
@@ -221,7 +300,7 @@ class BuiltinRenderPass {
     camera: CameraState,
     nodes: import("@webgpu-streaming/gpu-types").SceneGraphReadView,
   ): void {
-    if (!this._pipeline || !this._sceneUbo || !this._objUbo || !this._sceneBg || !this._objBg) return;
+    if (!this._pipeline || !this._sceneUbo || !this._objUbo || !this._sceneBg || !this._objBg || !this._whiteBg) return;
     const d = this._device;
 
     // Обновить UBO сцены
@@ -234,14 +313,18 @@ class BuiltinRenderPass {
 
     // Обновить UBO для каждого объекта
     const objBuf = new Float32Array(MAX_OBJECTS * OBJ_STRIDE / 4);
+    // Uint32Array-вид для записи useTexture (u32) в тот же буфер
+    const u32view = new Uint32Array(objBuf.buffer);
     let objCount = 0;
     for (const node of nodes.nodes) {
       if (!node.visible || objCount >= MAX_OBJECTS) continue;
-      const off = (objCount * OBJ_STRIDE) / 4;
-      objBuf.set(node.worldTransform, off);
+      const off = (objCount * OBJ_STRIDE) / 4; // смещение в float32-элементах
+      objBuf.set(node.worldTransform, off);      // model:      float[off .. off+15]
       const entry = this._objects.get(node.id);
       const color = entry?.color ?? new Float32Array([0.7, 0.5, 0.3, 1]);
-      objBuf.set(color, off + 16);
+      objBuf.set(color, off + 16);               // baseColor:  float[off+16 .. off+19]
+      // useTexture находится на байтовом смещении 80 = float-смещение 20 от начала объекта
+      u32view[off + 20] = entry?.texId ? 1 : 0;
       objCount++;
     }
     d.queue.writeBuffer(this._objUbo, 0, objBuf, 0, objCount * OBJ_STRIDE / 4);
@@ -264,6 +347,7 @@ class BuiltinRenderPass {
       if (!mesh)  { drawn++; continue; }
 
       pass.setBindGroup(1, objBg, [drawn * OBJ_STRIDE]);
+      pass.setBindGroup(2, this._getTexBg(entry.texId));
       pass.setVertexBuffer(0, mesh.vbo);
       pass.setIndexBuffer(mesh.ibo, "uint16");
       pass.drawIndexed(mesh.indexCount);
@@ -275,6 +359,10 @@ class BuiltinRenderPass {
   destroy(): void {
     this._sceneUbo?.destroy();
     this._objUbo?.destroy();
+    this._whiteTex?.destroy();
+    for (const t of this._texGPU.values()) t.destroy();
+    this._texGPU.clear();
+    this._texBGs.clear();
     for (const m of this._meshes.values()) { m.vbo.destroy(); m.ibo.destroy(); }
     this._meshes.clear();
   }
@@ -305,6 +393,8 @@ class TextureHandleImpl implements TextureHandle {
 class RendererImpl implements Renderer {
   private _meshCounter = 0;
   private _texCounter  = 0;
+  private _texLoadedCount = 0;   // текущее число живых TextureHandle
+  private _texMemMB = 0;         // суммарный объём GPU-памяти под текстуры
   private readonly _tracker = new FrameStatsTracker();
   private _disposed = false;
 
@@ -378,8 +468,49 @@ class RendererImpl implements Renderer {
     }
   }
 
-  async loadTexture(_src: string | ArrayBuffer, _opt?: TextureOptions): Promise<TextureHandle> {
-    return new TextureHandleImpl(`tex-${++this._texCounter}`, 1, 1, 1, 0);
+  async loadTexture(src: string | ArrayBuffer, _opt?: TextureOptions): Promise<TextureHandle> {
+    let data: ArrayBuffer;
+    if (typeof src === "string") {
+      const resp = await fetch(src);
+      if (!resp.ok) throw new Error(`[loadTexture] Не удалось загрузить: ${src} (${resp.status})`);
+      data = await resp.arrayBuffer();
+    } else {
+      data = src;
+    }
+
+    const bitmap = await createImageBitmap(new Blob([data]));
+    const { width, height } = bitmap;
+
+    const d = this._device;
+    d.pushErrorScope("out-of-memory");
+    const gpuTex = d.createTexture({
+      label: `user-tex-${this._texCounter + 1}`,
+      size: [width, height, 1],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+      mipLevelCount: 1,
+    });
+    void d.popErrorScope().then((err) => { if (err) { bitmap.close(); console.error("[api] OOM при создании текстуры:", err.message); } });
+
+    d.queue.copyExternalImageToTexture(
+      { source: bitmap, flipY: false },
+      { texture: gpuTex },
+      [width, height, 1],
+    );
+    bitmap.close();
+
+    const id = `tex-${++this._texCounter}`;
+    this._pass.registerTexture(id, gpuTex);
+
+    const texMB = (width * height * 4) / (1024 * 1024);
+    this._texLoadedCount++;
+    this._texMemMB += texMB;
+
+    return new TextureHandleImpl(id, width, height, 1, 0, () => {
+      this._pass.destroyTexture(id);
+      this._texLoadedCount = Math.max(0, this._texLoadedCount - 1);
+      this._texMemMB = Math.max(0, this._texMemMB - texMB);
+    });
   }
 
   addMesh(geometry: GeometryDescriptor, material: MaterialDescriptor): MeshHandle {
@@ -388,11 +519,21 @@ class RendererImpl implements Renderer {
     const vertexCount = geometry.positions.length / 3;
     const idxs    = toUint16Indices(geometry.indices, vertexCount);
     const sphere  = computeBoundingSphere(geometry.positions);
-    const color   = _parseColor(material.baseColor);
+
+    let color: Float32Array<ArrayBuffer>;
+    let texId: string | null = null;
+
+    if (material.baseColor && typeof material.baseColor !== "string") {
+      // TextureHandle — используем белый цвет-заглушку, сэмплинг выполнит шейдер
+      color = new Float32Array([1, 1, 1, 1]) as Float32Array<ArrayBuffer>;
+      texId = material.baseColor.id;
+    } else {
+      color = _parseColor(material.baseColor as string | undefined);
+    }
 
     this._pass.registerMesh(nodeId, verts as Float32Array<ArrayBuffer>, idxs as Uint16Array<ArrayBuffer>);
     this._sceneGraph.addNode(nodeId, 0, mat4Identity(), sphere);
-    this._pass.addObject(nodeId, nodeId, color);
+    this._pass.addObject(nodeId, nodeId, color, texId);
 
     return new MeshHandleImpl(nodeId, this._sceneGraph, this._pass);
   }
@@ -416,10 +557,10 @@ class RendererImpl implements Renderer {
 
   getStats(): StreamingStats {
     return {
-      memoryUsedMB: 0,
+      memoryUsedMB: this._texMemMB,
       memoryBudgetMB: this._budgetMB,
-      texturesLoaded: 0,
-      texturesTotal: 0,
+      texturesLoaded: this._texLoadedCount,
+      texturesTotal: this._texLoadedCount, // без стриминга — все загружены сразу
       residentMipDistribution: {},
       fps: this._tracker.fps(),
       frameTimeP99Ms: this._tracker.p99Ms(),
