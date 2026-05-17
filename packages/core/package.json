@@ -30,7 +30,8 @@
     "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
-    "@webgpu-streaming/gpu-types": "^0.1.0"
+    "@webgpu-streaming/gpu-types": "^0.1.0",
+    "@webgpu-streaming/texture-streaming": "^0.1.0"
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.49",

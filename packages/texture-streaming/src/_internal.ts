@@ -22,3 +22,5 @@ export {
   computeScreenCoverage,
   mipSizeBytes,
 } from "./mip-math.js";
+export { buildMipPyramid, packKtx2, decodeImage } from "./KTX2Builder.js";
+export type { MipPyramidResult } from "./KTX2Builder.js";

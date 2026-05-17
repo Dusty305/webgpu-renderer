@@ -481,8 +481,7 @@ function startStats(): void {
     svMem.textContent    = s.memoryUsedMB > 0   ? `${s.memoryUsedMB.toFixed(1)} MB`   : "-";
     svBudget.textContent = s.memoryBudgetMB > 0 ? `${s.memoryBudgetMB.toFixed(0)} MB` : "-";
     svTex.textContent    = s.texturesTotal > 0  ? String(s.texturesLoaded)             : "-";
-    // В этом рендерере нет потокового стриминга — текстуры загружаются полностью
-    svStream.textContent = s.texturesTotal > 0  ? "нет (полная загрузка)"              : "-";
+    svStream.textContent = s.texturesTotal > 0 ? `${s.texturesLoaded}/${s.texturesTotal}` : "-";
   }, 500);
 }
 

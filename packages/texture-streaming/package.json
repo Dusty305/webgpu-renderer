@@ -19,6 +19,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./internal": {
+      "types": "./dist/_internal.d.ts",
+      "import": "./dist/_internal.js",
+      "require": "./dist/_internal.cjs"
     }
   },
   "files": ["dist", "README.md", "LICENSE"],

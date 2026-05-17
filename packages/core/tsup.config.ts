@@ -10,5 +10,5 @@ export default defineConfig({
   splitting: false,
   target: "es2022",
   tsconfig: "tsconfig.json",
-  external: ["@webgpu-streaming/gpu-types"],
+  external: ["@webgpu-streaming/gpu-types", "@webgpu-streaming/texture-streaming"],
 });

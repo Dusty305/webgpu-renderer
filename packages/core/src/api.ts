@@ -9,7 +9,16 @@ import type {
   CameraOptions,
   StreamingStats,
   CameraState,
+  ResourceRegistry,
 } from "@webgpu-streaming/gpu-types";
+import {
+  TextureStreamingManager,
+  MATERIAL_BIND_GROUP_KEY,
+  buildMipPyramid,
+  packKtx2,
+  decodeImage,
+  parseKTX2,
+} from "@webgpu-streaming/texture-streaming/internal";
 import { DeviceManager } from "./DeviceManager.js";
 import { CameraController } from "./CameraController.js";
 import { RenderLoop } from "./RenderLoop.js";
@@ -25,7 +34,7 @@ import {
   MeshHandleImpl,
   FrameStatsTracker,
 } from "./_scene-utils.js";
-import { BUILTIN_WGSL } from "./_builtin-wgsl.js";
+import { BUILTIN_WGSL, NO_TEXTURE_MATERIAL_ID } from "./_builtin-wgsl.js";
 import { detectFormat } from "./loaders/FormatDetector.js";
 import { parseOBJBuffer } from "./loaders/OBJLoader.js";
 import { parseSTL } from "./loaders/STLLoader.js";
@@ -92,7 +101,7 @@ interface MeshGPU {
 interface ObjectEntry {
   meshId: string;
   color: Float32Array;
-  texId: string | null;
+  materialId: number;
 }
 
 class BuiltinRenderPass {
@@ -103,16 +112,12 @@ class BuiltinRenderPass {
   private _objUbo: GPUBuffer | null = null;
   private _objBg: GPUBindGroup | null = null;
   private _bgl2: GPUBindGroupLayout | null = null;
-  private _whiteTex: GPUTexture | null = null;
-  private _whiteBg: GPUBindGroup | null = null;
-  private _sampler: GPUSampler | null = null;
+  private _registry: ResourceRegistry | null = null;
   private _aspect = 1;
   private _fmt: GPUTextureFormat;
 
-  private readonly _meshes    = new Map<string, MeshGPU>();
-  private readonly _objects   = new Map<string, ObjectEntry>();
-  private readonly _texGPU    = new Map<string, GPUTexture>();
-  private readonly _texBGs    = new Map<string, GPUBindGroup>();
+  private readonly _meshes  = new Map<string, MeshGPU>();
+  private readonly _objects = new Map<string, ObjectEntry>();
 
   private readonly _lightDir   = new Float32Array([0.5773, -0.5773, -0.5773]);
   private readonly _lightColor = new Float32Array([1.2, 1.1, 1.0]);
@@ -140,28 +145,6 @@ class BuiltinRenderPass {
     });
     void d.popErrorScope().then((err) => { if (err) console.error("[api] Переполнение памяти GPU при выделении UBO:", err.message); });
 
-    // ---- Дефолтная 1×1 белая текстура (для мешей без текстуры) ---------------------------------------------------------------------------
-    this._whiteTex = d.createTexture({
-      label: "builtin-white-1x1",
-      size: [1, 1, 1],
-      format: "rgba8unorm",
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-    });
-    d.queue.writeTexture(
-      { texture: this._whiteTex },
-      new Uint8Array([255, 255, 255, 255]),
-      { bytesPerRow: 4 },
-      [1, 1, 1],
-    );
-
-    this._sampler = d.createSampler({
-      magFilter: "linear",
-      minFilter: "linear",
-      mipmapFilter: "linear",
-      addressModeU: "repeat",
-      addressModeV: "repeat",
-    });
-
     // ---- Макеты групп привязок --------------------------------------------------------------------------------------------------
     const bgl0 = d.createBindGroupLayout({
       label: "builtin-bgl0",
@@ -171,11 +154,17 @@ class BuiltinRenderPass {
       label: "builtin-bgl1",
       entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform", hasDynamicOffset: true } }],
     });
+    // Group 2: streaming bind group — совпадает с BindGroupManager.createLayout()
     const bgl2 = d.createBindGroupLayout({
-      label: "builtin-bgl2",
+      label: "builtin-bgl2-streaming",
       entries: [
-        { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
-        { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+        { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d-array" } },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d-array" } },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d-array" } },
+        { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+        { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+        { binding: 5, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+        { binding: 6, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "read-only-storage" } },
       ],
     });
     this._bgl2 = bgl2;
@@ -190,15 +179,6 @@ class BuiltinRenderPass {
       label: "builtin-obj-bg",
       layout: bgl1,
       entries: [{ binding: 0, resource: { buffer: this._objUbo!, size: OBJ_STRIDE } }],
-    });
-
-    this._whiteBg = d.createBindGroup({
-      label: "builtin-white-bg",
-      layout: bgl2,
-      entries: [
-        { binding: 0, resource: this._whiteTex.createView() },
-        { binding: 1, resource: this._sampler },
-      ],
     });
 
     const module = d.createShaderModule({ label: "builtin-shader", code: BUILTIN_WGSL });
@@ -228,6 +208,10 @@ class BuiltinRenderPass {
     });
   }
 
+  setRegistry(registry: ResourceRegistry): void {
+    this._registry = registry;
+  }
+
   registerMesh(id: string, verts: Float32Array<ArrayBuffer>, idxs: Uint16Array<ArrayBuffer>): void {
     const d = this._device;
     const old = this._meshes.get(id);
@@ -242,7 +226,6 @@ class BuiltinRenderPass {
     void d.popErrorScope().then((err) => { if (err) console.error(`[api] Переполнение памяти GPU при выделении IBO для ${id}:`, err.message); });
 
     d.queue.writeBuffer(vbo, 0, verts);
-    // writeBuffer требует, чтобы длина в байтах была кратна 4; при необходимости дополняем Uint16Array
     if (idxs.byteLength % 4 === 0) {
       d.queue.writeBuffer(ibo, 0, idxs);
     } else {
@@ -253,36 +236,13 @@ class BuiltinRenderPass {
     this._meshes.set(id, { vbo, ibo, indexCount: idxs.length });
   }
 
-  registerTexture(id: string, gpuTex: GPUTexture): void {
-    if (!this._bgl2 || !this._sampler) return;
-    const bg = this._device.createBindGroup({
-      label: `builtin-tex-bg-${id}`,
-      layout: this._bgl2,
-      entries: [
-        { binding: 0, resource: gpuTex.createView() },
-        { binding: 1, resource: this._sampler },
-      ],
-    });
-    this._texGPU.set(id, gpuTex);
-    this._texBGs.set(id, bg);
-  }
-
-  destroyTexture(id: string): void {
-    this._texGPU.get(id)?.destroy();
-    this._texGPU.delete(id);
-    this._texBGs.delete(id);
-  }
-
-  private _getTexBg(texId: string | null): GPUBindGroup {
-    if (texId) {
-      const bg = this._texBGs.get(texId);
-      if (bg) return bg;
-    }
-    return this._whiteBg!;
-  }
-
-  addObject(nodeId: string, meshId: string, color: Float32Array<ArrayBuffer> = new Float32Array([0.7, 0.5, 0.3, 1]) as Float32Array<ArrayBuffer>, texId: string | null = null): void {
-    this._objects.set(nodeId, { meshId, color, texId });
+  addObject(
+    nodeId: string,
+    meshId: string,
+    color: Float32Array<ArrayBuffer> = new Float32Array([0.7, 0.5, 0.3, 1]) as Float32Array<ArrayBuffer>,
+    materialId: number = NO_TEXTURE_MATERIAL_ID,
+  ): void {
+    this._objects.set(nodeId, { meshId, color, materialId });
   }
 
   removeObject(nodeId: string): void {
@@ -300,31 +260,34 @@ class BuiltinRenderPass {
     camera: CameraState,
     nodes: import("@webgpu-streaming/gpu-types").SceneGraphReadView,
   ): void {
-    if (!this._pipeline || !this._sceneUbo || !this._objUbo || !this._sceneBg || !this._objBg || !this._whiteBg) return;
+    if (!this._pipeline || !this._sceneUbo || !this._objUbo || !this._sceneBg || !this._objBg) return;
+
+    const streamingBg = this._registry?.request<GPUBindGroup>(MATERIAL_BIND_GROUP_KEY) ?? null;
+    if (!streamingBg) return; // не готов до инициализации streaming manager
+
     const d = this._device;
 
     // Обновить UBO сцены
     const sceneData = new Float32Array(32);
-    sceneData.set(camera.viewProjectionMatrix, 0); // 16 вещественных чисел
-    sceneData.set(camera.position, 16);             // 3 вещественных числа (+ 1 выравнивание)
+    sceneData.set(camera.viewProjectionMatrix, 0);
+    sceneData.set(camera.position, 16);
     sceneData.set(this._lightDir, 20);
     sceneData.set(this._lightColor, 24);
     d.queue.writeBuffer(this._sceneUbo, 0, sceneData);
 
     // Обновить UBO для каждого объекта
     const objBuf = new Float32Array(MAX_OBJECTS * OBJ_STRIDE / 4);
-    // Uint32Array-вид для записи useTexture (u32) в тот же буфер
     const u32view = new Uint32Array(objBuf.buffer);
     let objCount = 0;
     for (const node of nodes.nodes) {
       if (!node.visible || objCount >= MAX_OBJECTS) continue;
-      const off = (objCount * OBJ_STRIDE) / 4; // смещение в float32-элементах
-      objBuf.set(node.worldTransform, off);      // model:      float[off .. off+15]
+      const off = (objCount * OBJ_STRIDE) / 4;
+      objBuf.set(node.worldTransform, off);           // model:     float[off..off+15]
       const entry = this._objects.get(node.id);
       const color = entry?.color ?? new Float32Array([0.7, 0.5, 0.3, 1]);
-      objBuf.set(color, off + 16);               // baseColor:  float[off+16 .. off+19]
-      // useTexture находится на байтовом смещении 80 = float-смещение 20 от начала объекта
-      u32view[off + 20] = entry?.texId ? 1 : 0;
+      objBuf.set(color, off + 16);                    // baseColor: float[off+16..off+19]
+      // materialId находится на байтовом смещении 80 = float-смещение 20 от начала объекта
+      u32view[off + 20] = entry?.materialId ?? NO_TEXTURE_MATERIAL_ID;
       objCount++;
     }
     d.queue.writeBuffer(this._objUbo, 0, objBuf, 0, objCount * OBJ_STRIDE / 4);
@@ -337,6 +300,7 @@ class BuiltinRenderPass {
     });
     pass.setPipeline(this._pipeline);
     pass.setBindGroup(0, this._sceneBg);
+    pass.setBindGroup(2, streamingBg);
 
     let drawn = 0;
     for (const node of nodes.nodes) {
@@ -347,7 +311,6 @@ class BuiltinRenderPass {
       if (!mesh)  { drawn++; continue; }
 
       pass.setBindGroup(1, objBg, [drawn * OBJ_STRIDE]);
-      pass.setBindGroup(2, this._getTexBg(entry.texId));
       pass.setVertexBuffer(0, mesh.vbo);
       pass.setIndexBuffer(mesh.ibo, "uint16");
       pass.drawIndexed(mesh.indexCount);
@@ -359,10 +322,6 @@ class BuiltinRenderPass {
   destroy(): void {
     this._sceneUbo?.destroy();
     this._objUbo?.destroy();
-    this._whiteTex?.destroy();
-    for (const t of this._texGPU.values()) t.destroy();
-    this._texGPU.clear();
-    this._texBGs.clear();
     for (const m of this._meshes.values()) { m.vbo.destroy(); m.ibo.destroy(); }
     this._meshes.clear();
   }
@@ -393,10 +352,13 @@ class TextureHandleImpl implements TextureHandle {
 class RendererImpl implements Renderer {
   private _meshCounter = 0;
   private _texCounter  = 0;
-  private _texLoadedCount = 0;   // текущее число живых TextureHandle
-  private _texMemMB = 0;         // суммарный объём GPU-памяти под текстуры
+  private _texLoadedCount = 0;
   private readonly _tracker = new FrameStatsTracker();
   private _disposed = false;
+
+  // materialId → streaming manager ID; id → materialId
+  private readonly _matIdMap = new Map<string, number>();
+  private _nextMatId = 0;
 
   constructor(
     private readonly _device: GPUDevice,
@@ -407,6 +369,7 @@ class RendererImpl implements Renderer {
     private readonly _camera: ManualCameraController,
     private readonly _orbit: CameraController,
     private readonly _budgetMB: number,
+    private readonly _streaming: TextureStreamingManager,
   ) {}
 
   get device(): GPUDevice { return this._device; }
@@ -478,38 +441,22 @@ class RendererImpl implements Renderer {
       data = src;
     }
 
-    const bitmap = await createImageBitmap(new Blob([data]));
-    const { width, height } = bitmap;
-
-    const d = this._device;
-    d.pushErrorScope("out-of-memory");
-    const gpuTex = d.createTexture({
-      label: `user-tex-${this._texCounter + 1}`,
-      size: [width, height, 1],
-      format: "rgba8unorm",
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-      mipLevelCount: 1,
-    });
-    void d.popErrorScope().then((err) => { if (err) { bitmap.close(); console.error("[api] OOM при создании текстуры:", err.message); } });
-
-    d.queue.copyExternalImageToTexture(
-      { source: bitmap, flipY: false },
-      { texture: gpuTex },
-      [width, height, 1],
-    );
-    bitmap.close();
+    const { data: rgba, width, height } = await decodeImage(new Blob([data]));
+    const { mips } = buildMipPyramid(rgba, width, height);
+    const ktx2Bytes = packKtx2(mips, width, height);
+    const parsed = parseKTX2(ktx2Bytes);
 
     const id = `tex-${++this._texCounter}`;
-    this._pass.registerTexture(id, gpuTex);
+    const matId = this._nextMatId++;
 
-    const texMB = (width * height * 4) / (1024 * 1024);
+    this._streaming.registerTexture(id, parsed, ktx2Bytes, matId, new Float32Array([0, 0, 0, 1]));
+    this._matIdMap.set(id, matId);
     this._texLoadedCount++;
-    this._texMemMB += texMB;
 
-    return new TextureHandleImpl(id, width, height, 1, 0, () => {
-      this._pass.destroyTexture(id);
+    return new TextureHandleImpl(id, width, height, mips.length, parsed.levelCount - 1, () => {
+      this._streaming.unregisterTexture(id);
+      this._matIdMap.delete(id);
       this._texLoadedCount = Math.max(0, this._texLoadedCount - 1);
-      this._texMemMB = Math.max(0, this._texMemMB - texMB);
     });
   }
 
@@ -521,19 +468,19 @@ class RendererImpl implements Renderer {
     const sphere  = computeBoundingSphere(geometry.positions);
 
     let color: Float32Array<ArrayBuffer>;
-    let texId: string | null = null;
+    let materialId = NO_TEXTURE_MATERIAL_ID;
 
     if (material.baseColor && typeof material.baseColor !== "string") {
-      // TextureHandle — используем белый цвет-заглушку, сэмплинг выполнит шейдер
       color = new Float32Array([1, 1, 1, 1]) as Float32Array<ArrayBuffer>;
-      texId = material.baseColor.id;
+      const texId = material.baseColor.id;
+      materialId = this._matIdMap.get(texId) ?? NO_TEXTURE_MATERIAL_ID;
     } else {
       color = _parseColor(material.baseColor as string | undefined);
     }
 
     this._pass.registerMesh(nodeId, verts as Float32Array<ArrayBuffer>, idxs as Uint16Array<ArrayBuffer>);
     this._sceneGraph.addNode(nodeId, 0, mat4Identity(), sphere);
-    this._pass.addObject(nodeId, nodeId, color, texId);
+    this._pass.addObject(nodeId, nodeId, color, materialId);
 
     return new MeshHandleImpl(nodeId, this._sceneGraph, this._pass);
   }
@@ -541,7 +488,6 @@ class RendererImpl implements Renderer {
   removeMesh(handle: MeshHandle): void { handle.destroy(); }
 
   setCamera(options: CameraOptions): void {
-    // Настроить контроллер орбиты, чтобы взаимодействие мышью работало с новой точки обзора
     if (options.position && options.target) {
       const [px, py, pz] = options.position;
       const [tx, ty, tz] = options.target;
@@ -551,16 +497,16 @@ class RendererImpl implements Renderer {
     }
     if (options.fov)  this._orbit.setFov(options.fov * Math.PI / 180);
     if (options.near != null && options.far != null) this._orbit.setClip(options.near, options.far);
-    // Также синхронизировать ручную камеру для цикла кадров
     this._camera.setOptions(options, this._camera.currentAspect);
   }
 
   getStats(): StreamingStats {
+    const bt = this._streaming.budgetTracker;
     return {
-      memoryUsedMB: this._texMemMB,
+      memoryUsedMB:   bt ? bt.totalUsed / (1024 * 1024) : 0,
       memoryBudgetMB: this._budgetMB,
       texturesLoaded: this._texLoadedCount,
-      texturesTotal: this._texLoadedCount, // без стриминга — все загружены сразу
+      texturesTotal:  this._texLoadedCount,
       residentMipDistribution: {},
       fps: this._tracker.fps(),
       frameTimeP99Ms: this._tracker.p99Ms(),
@@ -600,6 +546,7 @@ export async function createRenderer(options: CreateRendererOptions): Promise<Re
   const {
     canvas,
     memoryBudget = 256,
+    frameUploadCap = 8,
     powerPreference: _pref = "high-performance",
   } = options;
 
@@ -609,10 +556,10 @@ export async function createRenderer(options: CreateRendererOptions): Promise<Re
   await dm.initialize();
   const device = dm.device!;
 
-  const ctx = canvas.getContext("webgpu") as GPUCanvasContext | null;
-  if (!ctx) throw new Error("Не удалось получить GPUCanvasContext.");
+  const gpuCtx = canvas.getContext("webgpu") as GPUCanvasContext | null;
+  if (!gpuCtx) throw new Error("Не удалось получить GPUCanvasContext.");
   const fmt = navigator.gpu.getPreferredCanvasFormat();
-  ctx.configure({ device, format: fmt, alphaMode: "opaque" });
+  gpuCtx.configure({ device, format: fmt, alphaMode: "opaque" });
 
   let w = canvas.width  || canvas.clientWidth  || 300;
   let h = canvas.height || canvas.clientHeight || 150;
@@ -627,17 +574,23 @@ export async function createRenderer(options: CreateRendererOptions): Promise<Re
   const pass       = new BuiltinRenderPass(device, fmt);
   pass.onResize(w, h);
 
-  // PluginHost/ResourceRegistry инициализируются (не используются для встроенного прохода),
-  // чтобы потребители могли подключать собственные менеджеры ресурсов через SceneGraph.
   const registry   = new ResourceRegistryImpl();
   const pluginHost = new PluginHost();
   await pluginHost.initialize(device, registry, fmt);
 
-  void registry; // registry доступен для расширенного использования через renderer.device
+  // Инициализировать TextureStreamingManager — он регистрирует bind group в registry
+  const streaming = new TextureStreamingManager({
+    budgetBytes: memoryBudget * 1024 * 1024,
+    frameUploadBudget: frameUploadCap * 1024 * 1024,
+    maxLayersPerTier: [32, 16, 4],
+  });
+  await streaming.initialize({ device, registry });
+
+  pass.setRegistry(registry);
 
   const loop = new RenderLoop();
 
-  const impl = new RendererImpl(device, dm, loop, sceneGraph, pass, camera, orbit, memoryBudget);
+  const impl = new RendererImpl(device, dm, loop, sceneGraph, pass, camera, orbit, memoryBudget, streaming);
 
   const ro = new ResizeObserver((entries) => {
     for (const e of entries) {
@@ -659,7 +612,7 @@ export async function createRenderer(options: CreateRendererOptions): Promise<Re
     if (w <= 0 || h <= 0) return;
     impl._recordFrame(performance.now());
 
-    const colorView = ctx.getCurrentTexture().createView();
+    const colorView = gpuCtx.getCurrentTexture().createView();
     const encoder   = device.createCommandEncoder({ label: `frame-${frameIndex}` });
 
     // Очистка фона
@@ -669,7 +622,21 @@ export async function createRenderer(options: CreateRendererOptions): Promise<Re
     });
     clearPass.end();
 
-    pass.execute(encoder, colorView, depthView, orbit.getCameraState(), sceneGraph.getReadView());
+    const camState = orbit.getCameraState();
+
+    // Обновить streaming manager (загружает мипы, вытесняет, перестраивает bind group)
+    streaming.prepareFrame({
+      device,
+      encoder,
+      camera: { ...camState, viewportWidth: w, viewportHeight: h },
+      scene: sceneGraph.getReadView(),
+      frameIndex,
+      deltaTime,
+      colorAttachment: colorView,
+      depthAttachment: depthView,
+    });
+
+    pass.execute(encoder, colorView, depthView, camState, sceneGraph.getReadView());
 
     device.pushErrorScope("validation");
     const cmd = encoder.finish();

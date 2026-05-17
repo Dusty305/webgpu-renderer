@@ -79,6 +79,8 @@ export default defineConfig({
       // чтобы публичный index.ts экспортировал только потребительский API.
       "@webgpu-streaming/core": resolve(__dirname, "../core/src/_internal.ts"),
       "@webgpu-streaming/render-basic": resolve(__dirname, "../render-basic/src/_internal.ts"),
+      // Более специфичный алиас должен идти РАНЬШЕ базового, иначе базовый перехватывает /internal
+      "@webgpu-streaming/texture-streaming/internal": resolve(__dirname, "../texture-streaming/src/_internal.ts"),
       "@webgpu-streaming/texture-streaming": resolve(__dirname, "../texture-streaming/src/_internal.ts"),
     },
   },

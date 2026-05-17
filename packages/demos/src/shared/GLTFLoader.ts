@@ -15,7 +15,7 @@
  * для прямой передачи в TextureStreamingManager.registerTexture().
  */
 
-import { parseKTX2 } from "@webgpu-streaming/texture-streaming";
+import { parseKTX2, buildMipPyramid, packKtx2, decodeImage } from "@webgpu-streaming/texture-streaming";
 import type { KTX2ParseResult } from "@webgpu-streaming/texture-streaming";
 
 // ---- Публичные типы ----------------------------------------------------------------------------------------------------------------------------
@@ -294,135 +294,6 @@ function nodeLocalTransform(node: GltfNode): Float32Array {
   return mat4FromTRS(node.translation, node.rotation, node.scale);
 }
 
-// ---- Декодирование изображений ------------------------------------------------------------------------------------------------------------------------
-
-async function decodeImage(blob: Blob): Promise<{ data: Uint8Array; width: number; height: number }> {
-  const bitmap = await createImageBitmap(blob);
-  const { width, height } = bitmap;
-
-  // Округляем вверх до ближайшего размера уровня (512, 1024 или 2048), чтобы
-  // декодированное изображение точно заполняло свой слой массива уровней.
-  // Это исключает неинициализированные граничные тексели при UV близких к 1.0 с wrap=clamp.
-  const maxDim = Math.max(width, height);
-  const tierSize = maxDim <= 512 ? 512 : maxDim <= 1024 ? 1024 : 2048;
-
-  const canvas = new OffscreenCanvas(tierSize, tierSize);
-  const ctx = canvas.getContext("2d")!;
-  // Рисуем изображение, масштабируя до точного размера tierSize×tierSize.
-  // Большинство PBR-текстур квадратны; неквадратные будут слегка растянуты
-  // (лучше, чем неинициализированные чёрные границы при UV, достигающих 1.0).
-  ctx.drawImage(bitmap, 0, 0, tierSize, tierSize);
-  bitmap.close();
-
-  const imageData = ctx.getImageData(0, 0, tierSize, tierSize);
-  return { data: new Uint8Array(imageData.data.buffer), width: tierSize, height: tierSize };
-}
-
-// ---- Генерация мипов и упаковка в KTX2 ------------------------------------------------------------------------------------
-
-const KTX2_MAGIC = new Uint8Array([
-  0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a,
-]);
-
-function downsampleMip(src: Uint8Array, sw: number, sh: number): Uint8Array {
-  const dw = Math.max(1, sw >> 1);
-  const dh = Math.max(1, sh >> 1);
-  const dst = new Uint8Array(dw * dh * 4);
-  for (let y = 0; y < dh; y++) {
-    for (let x = 0; x < dw; x++) {
-      const so = (y * 2 * sw + x * 2) * 4;
-      const do_ = (y * dw + x) * 4;
-      for (let c = 0; c < 4; c++) {
-        const sx1 = x * 2 + 1 < sw ? so + 4 + c : so + c;
-        const sy1 = y * 2 + 1 < sh ? so + sw * 4 + c : so + c;
-        const sxy = x * 2 + 1 < sw && y * 2 + 1 < sh ? so + sw * 4 + 4 + c : so + c;
-        dst[do_ + c] = ((src[so + c]! + src[sx1]! + src[sy1]! + src[sxy]!) >> 2);
-      }
-    }
-  }
-  return dst;
-}
-
-function buildMipPyramid(
-  mip0: Uint8Array,
-  width: number,
-  height: number
-): { mips: Uint8Array[]; widths: number[]; heights: number[] } {
-  const mips = [mip0];
-  const widths = [width];
-  const heights = [height];
-  let cw = width, ch = height, cur = mip0;
-  while (cw > 1 || ch > 1) {
-    const next = downsampleMip(cur, cw, ch);
-    cw = Math.max(1, cw >> 1);
-    ch = Math.max(1, ch >> 1);
-    mips.push(next);
-    widths.push(cw);
-    heights.push(ch);
-    cur = next;
-  }
-  return { mips, widths, heights };
-}
-
-/**
- * Упаковывает пирамиду мипов в буфер KTX2 (несжатый RGBA8 SRGB).
- * Поддерживает неквадратные текстуры.
- */
-function packKtx2(
-  mips: Uint8Array[],
-  width: number,
-  height: number
-): ArrayBuffer {
-  const mc = mips.length;
-  const DFD_OFFSET = 80 + mc * 24;
-  const DFD_SIZE = 28;
-  const MIPS_START = DFD_OFFSET + DFD_SIZE;
-
-  const offsets: number[] = [];
-  let off = MIPS_START;
-  for (let l = 0; l < mc; l++) {
-    offsets.push(off);
-    off += mips[l]!.byteLength;
-  }
-
-  const buf = new ArrayBuffer(off);
-  const u8 = new Uint8Array(buf);
-  const dv = new DataView(buf);
-
-  u8.set(KTX2_MAGIC, 0);
-  let p = 12;
-  dv.setUint32(p, 43, true); p += 4; // VK_FORMAT_R8G8B8A8_SRGB
-  dv.setUint32(p, 1, true); p += 4;  // typeSize
-  dv.setUint32(p, width, true); p += 4;
-  dv.setUint32(p, height, true); p += 4;
-  dv.setUint32(p, 0, true); p += 4;  // pixelDepth
-  dv.setUint32(p, 0, true); p += 4;  // layerCount
-  dv.setUint32(p, 1, true); p += 4;  // faceCount
-  dv.setUint32(p, mc, true); p += 4;
-  dv.setUint32(p, 0, true); p += 4;  // supercompressionScheme
-  dv.setUint32(p, DFD_OFFSET, true); p += 4;
-  dv.setUint32(p, DFD_SIZE, true); p += 4;
-  dv.setUint32(p, 0, true); p += 4;  // kvd offset
-  dv.setUint32(p, 0, true); p += 4;  // kvd length
-  dv.setBigUint64(p, 0n, true); p += 8; // sgd offset
-  dv.setBigUint64(p, 0n, true); p += 8; // sgd length
-
-  for (let l = 0; l < mc; l++) {
-    const bl = BigInt(mips[l]!.byteLength);
-    dv.setBigUint64(p, BigInt(offsets[l]!), true); p += 8;
-    dv.setBigUint64(p, bl, true); p += 8;
-    dv.setBigUint64(p, bl, true); p += 8;
-  }
-
-  // Минимальный DFD
-  dv.setUint32(p, DFD_SIZE, true); p += 4;
-  dv.setUint32(p, DFD_SIZE - 4, true); p += 4;
-  for (let i = 0; i < 5; i++) { dv.setUint32(p, 0, true); p += 4; }
-
-  for (let l = 0; l < mc; l++) u8.set(mips[l]!, offsets[l]!);
-  return buf;
-}
-
 // ---- Ограничивающая сфера ----------------------------------------------------------------------------------------------------------------------
 
 function computeBoundingSphere(
@@ -680,5 +551,176 @@ export async function loadGLTF(
   }
 
   onProgress?.(`Loaded ${loadedMeshes.length} primitives, ${loadedTextures.length} textures.`);
+  return { meshes: loadedMeshes, textures: loadedTextures };
+}
+
+// ---- GLB binary loader -----------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Загружает сцену из GLB-буфера (drag & drop / FileReader).
+ * Конвертирует встроенные JPEG/PNG в KTX2 с мипирамидой, пригодной для
+ * TextureStreamingManager.registerTexture().
+ */
+export async function loadGLTFFromBuffer(
+  buffer: ArrayBuffer,
+  onProgress?: LoadProgress,
+): Promise<LoadedScene> {
+  // ---- 1. Парсим GLB-контейнер -------------------------------------------------------------------------------------------
+  const dv = new DataView(buffer);
+  if (dv.getUint32(0, true) !== 0x46546C67) throw new Error("[GLTFLoader] Not a valid GLB file");
+
+  const jsonLen  = dv.getUint32(12, true);
+  const jsonType = dv.getUint32(16, true);
+  if (jsonType !== 0x4E4F534A) throw new Error("[GLTFLoader] Expected JSON chunk first in GLB");
+
+  const gltf = JSON.parse(
+    new TextDecoder().decode(new Uint8Array(buffer, 20, jsonLen))
+  ) as GltfRoot;
+
+  let binBuf: ArrayBuffer = new ArrayBuffer(0);
+  const binOff = 20 + jsonLen;
+  if (binOff + 8 <= buffer.byteLength) {
+    const bLen  = dv.getUint32(binOff,     true);
+    const bType = dv.getUint32(binOff + 4, true);
+    if (bType === 0x004E4942) {
+      binBuf = buffer.slice(binOff + 8, binOff + 8 + bLen);
+    }
+  }
+
+  // В GLB все bufferView ссылаются на buffer 0 — передаём его как единственный элемент
+  const rawBuffers: ArrayBuffer[] = [binBuf];
+
+  const materials    = gltf.materials   ?? [];
+  const gltfTextures = gltf.textures    ?? [];
+  const gltfImages   = gltf.images      ?? [];
+
+  // ---- 2. Определяем нужные изображения (только albedo) -------------------------------------------------------------------
+  const gltfTexIdxToLoadedIdx = new Map<number, number>();
+  const imagesToLoad: number[] = [];
+
+  for (const mat of materials) {
+    const albedo = mat.pbrMetallicRoughness?.baseColorTexture;
+    if (albedo === undefined) continue;
+    const gltfTexIdx = albedo.index;
+    if (gltfTexIdxToLoadedIdx.has(gltfTexIdx)) continue;
+    const srcIdx = gltfTextures[gltfTexIdx]?.source ?? -1;
+    if (srcIdx === -1) continue;
+    gltfTexIdxToLoadedIdx.set(gltfTexIdx, imagesToLoad.length);
+    imagesToLoad.push(srcIdx);
+  }
+
+  // ---- 3. Декодируем изображения → KTX2 -----------------------------------------------------------------------------------
+  const loadedTextures: LoadedTexture[] = [];
+
+  for (let i = 0; i < imagesToLoad.length; i++) {
+    const srcIdx  = imagesToLoad[i]!;
+    const gltfImg = gltfImages[srcIdx]!;
+    onProgress?.(`Обработка текстуры ${i + 1}/${imagesToLoad.length}…`);
+
+    let blob: Blob | undefined;
+    if (gltfImg.bufferView !== undefined) {
+      const bv    = gltf.bufferViews![gltfImg.bufferView]!;
+      const slice = binBuf.slice(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength);
+      blob = new Blob([slice], { type: gltfImg.mimeType ?? "image/jpeg" });
+    } else if (gltfImg.uri?.startsWith("data:")) {
+      const comma = gltfImg.uri.indexOf(",");
+      if (comma !== -1) {
+        const mime = gltfImg.uri.slice(5, gltfImg.uri.indexOf(";")) || "image/jpeg";
+        const bin  = atob(gltfImg.uri.slice(comma + 1));
+        const bytes = new Uint8Array(bin.length);
+        for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+        blob = new Blob([bytes], { type: mime });
+      }
+    }
+
+    if (!blob) continue;
+
+    const { data: rgba, width, height } = await decodeImage(blob);
+    const { mips } = buildMipPyramid(rgba, width, height);
+    const ktx2Bytes = packKtx2(mips, width, height);
+    const parsed    = parseKTX2(ktx2Bytes);
+
+    loadedTextures.push({ id: `tex-${i}`, ktx2Bytes, parsed, width, height });
+  }
+
+  // ---- 4. Маппинг материал → текстура -------------------------------------------------------------------------------------
+  const matToTexIdx: number[] = materials.map((mat) => {
+    const albedo = mat.pbrMetallicRoughness?.baseColorTexture;
+    if (!albedo) return -1;
+    return gltfTexIdxToLoadedIdx.get(albedo.index) ?? -1;
+  });
+
+  // ---- 5. Обход иерархии узлов → примитивы -------------------------------------------------------------------------------
+  onProgress?.("Парсинг мешей…");
+  const scene = gltf.scenes?.[gltf.scene ?? 0];
+  const primitives: PrimitiveResult[] = [];
+  const identity = mat4Identity();
+  for (const rootIdx of scene?.nodes ?? []) {
+    collectPrimitives(gltf, rootIdx, identity, primitives);
+  }
+
+  // ---- 6. Формируем LoadedMesh[] ------------------------------------------------------------------------------------------
+  const loadedMeshes: LoadedMesh[] = [];
+
+  for (const { meshIdx, primIdx, worldTransform } of primitives) {
+    const mesh = gltf.meshes![meshIdx]!;
+    const prim = mesh.primitives[primIdx]!;
+
+    const posAccIdx  = prim.attributes["POSITION"];
+    if (posAccIdx === undefined) continue;
+
+    const normAccIdx = prim.attributes["NORMAL"];
+    const uvAccIdx   = prim.attributes["TEXCOORD_0"];
+
+    const positions = readAccessor(gltf, posAccIdx, rawBuffers) as Float32Array;
+    const normals   = normAccIdx !== undefined
+      ? readAccessor(gltf, normAccIdx, rawBuffers) as Float32Array
+      : new Float32Array(positions.length).fill(0);
+    const uvs       = uvAccIdx !== undefined
+      ? readAccessor(gltf, uvAccIdx, rawBuffers) as Float32Array
+      : new Float32Array((positions.length / 3) * 2).fill(0);
+
+    const vertexCount = positions.length / 3;
+    const vertexData  = new Float32Array(vertexCount * 8);
+    for (let v = 0; v < vertexCount; v++) {
+      const vo = v * 8;
+      vertexData[vo]     = positions[v * 3]!;
+      vertexData[vo + 1] = positions[v * 3 + 1]!;
+      vertexData[vo + 2] = positions[v * 3 + 2]!;
+      vertexData[vo + 3] = normals[v * 3]!;
+      vertexData[vo + 4] = normals[v * 3 + 1]!;
+      vertexData[vo + 5] = normals[v * 3 + 2]!;
+      vertexData[vo + 6] = uvs[v * 2]!;
+      vertexData[vo + 7] = uvs[v * 2 + 1]!;
+    }
+
+    let indexData: Uint16Array | Uint32Array;
+    let indexCount: number;
+    if (prim.indices !== undefined) {
+      const raw = readAccessor(gltf, prim.indices, rawBuffers);
+      indexData  = raw instanceof Uint32Array ? raw : new Uint16Array(raw);
+      indexCount = indexData.length;
+    } else {
+      indexCount = vertexCount;
+      indexData  = vertexCount > 65535
+        ? new Uint32Array(vertexCount).map((_, i) => i)
+        : new Uint16Array(vertexCount).map((_, i) => i);
+    }
+
+    const textureIndex = prim.material !== undefined ? (matToTexIdx[prim.material] ?? -1) : -1;
+    const name = `${mesh.name ?? `mesh-${meshIdx}`}-${primIdx}`;
+
+    loadedMeshes.push({
+      name,
+      vertexData,
+      indexData,
+      indexCount,
+      textureIndex,
+      boundingSphere: computeBoundingSphere(positions, worldTransform),
+      worldTransform,
+    });
+  }
+
+  onProgress?.(`Загружено ${loadedMeshes.length} примитивов, ${loadedTextures.length} текстур.`);
   return { meshes: loadedMeshes, textures: loadedTextures };
 }
