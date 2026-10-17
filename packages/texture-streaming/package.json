@@ -7,10 +7,10 @@
   "keywords": ["webgpu", "texture-streaming", "mip-streaming", "lru", "budget-management"],
   "repository": {
     "type": "git",
-    "url": "https://github.com/webgpu-streaming/webgpu-streaming",
+    "url": "https://github.com/Dusty305/webgpu-renderer",
     "directory": "packages/texture-streaming"
   },
-  "homepage": "https://github.com/webgpu-streaming/webgpu-streaming#readme",
+  "homepage": "https://github.com/Dusty305/webgpu-renderer#readme",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
