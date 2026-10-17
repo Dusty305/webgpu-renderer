@@ -14,7 +14,7 @@ npm run build
 ```bash
 npm run dev
 # Откройте http://localhost:5173
-# Перейдите в /src/01-device-init/ - /src/16-public-api/
+# Перейдите в /01/ … /22-lifecycle/ (каталоги packages/demos/src/*)
 ```
 
 ## Запуск тестов
